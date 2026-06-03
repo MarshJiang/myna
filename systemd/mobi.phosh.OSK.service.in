@@ -1,0 +1,12 @@
+[Unit]
+Description=Myna Phosh OSK
+CollectMode=inactive-or-failed
+After=gnome-session-initialized.target
+
+[Service]
+Slice=session.slice
+Type=simple
+BusName=sm.puri.OSK0
+ExecStart=@bindir@/myna-osk
+Restart=on-failure
+TimeoutStopSec=5
