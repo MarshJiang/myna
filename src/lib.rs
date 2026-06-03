@@ -143,7 +143,7 @@ pub unsafe extern "C" fn myna_keyboard_press_label(
         }
         "Space" => return handle_space(kbd),
         "Backspace" => return handle_backspace(kbd),
-        "Enter" => return action(Some("\n".to_string()), true),
+        "Enter" => return handle_enter(kbd),
         "Mode" => return myna_keyboard_toggle_mode(kbd),
         _ => {}
     }
@@ -192,6 +192,16 @@ unsafe fn handle_backspace(kbd: &mut Keyboard) -> *mut MynaAction {
     }
 
     action(Some("\u{8}".to_string()), true)
+}
+
+unsafe fn handle_enter(kbd: &mut Keyboard) -> *mut MynaAction {
+    if kbd.mode == MynaMode::Pinyin && !kbd.rime.is_null() && myna_rime_is_composing(kbd.rime) {
+        myna_rime_process_key(kbd.rime, b' ' as c_int);
+        let commit = take_optional_string(myna_rime_take_commit(kbd.rime));
+        return action(commit, true);
+    }
+
+    action(Some("\n".to_string()), true)
 }
 
 #[no_mangle]

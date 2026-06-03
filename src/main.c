@@ -8,6 +8,19 @@
 #define OSK_BUS_NAME "sm.puri.OSK0"
 #define OSK_OBJECT_PATH "/sm/puri/OSK0"
 
+typedef enum {
+  LAYOUT_MAIN,
+  LAYOUT_SYMBOLS,
+  LAYOUT_NUMBERS,
+} LayoutPage;
+
+typedef struct {
+  const char *label;
+  const char *action;
+  int width;
+  const char *style_class;
+} KeySpec;
+
 typedef struct {
   GtkApplication *app;
   MynaWayland wayland;
@@ -17,12 +30,14 @@ typedef struct {
   GtkWidget *preedit_label;
   GtkWidget *mode_button;
   GtkWidget *main_grid;
+  GtkWidget *keyboard_area;
   GDBusNodeInfo *introspection;
   GDBusConnection *bus;
   guint registration_id;
   gboolean visible;
   gboolean started;
   gboolean show_on_start;
+  LayoutPage page;
   char *session_client_id;
 } MynaApp;
 
@@ -40,6 +55,8 @@ static const char introspection_xml[] =
   "</node>";
 
 static void refresh_view (MynaApp *self);
+static void rebuild_keyboard (MynaApp *self);
+static void set_visible (MynaApp *self, gboolean visible);
 
 static int
 panel_height_for_screen (void)
@@ -91,10 +108,35 @@ handle_action (MynaApp *self, MynaAction *action)
 }
 
 static void
+set_page (MynaApp *self, LayoutPage page)
+{
+  self->page = page;
+  rebuild_keyboard (self);
+  refresh_view (self);
+}
+
+static void
 on_key_clicked (GtkButton *button, gpointer user_data)
 {
   MynaApp *self = user_data;
   const char *label = g_object_get_data (G_OBJECT (button), "myna-label");
+
+  if (g_strcmp0 (label, "Symbols") == 0) {
+    set_page (self, LAYOUT_SYMBOLS);
+    return;
+  }
+  if (g_strcmp0 (label, "Numbers") == 0) {
+    set_page (self, LAYOUT_NUMBERS);
+    return;
+  }
+  if (g_strcmp0 (label, "Main") == 0) {
+    set_page (self, LAYOUT_MAIN);
+    return;
+  }
+  if (g_strcmp0 (label, "Hide") == 0) {
+    set_visible (self, FALSE);
+    return;
+  }
 
   handle_action (self, myna_keyboard_press_label (self->keyboard, label));
 }
@@ -117,15 +159,37 @@ on_candidate_clicked (GtkButton *button, gpointer user_data)
   handle_action (self, myna_keyboard_select_candidate (self->keyboard, index));
 }
 
-static GtkWidget *
-make_button (const char *label, const char *action_label)
+static void
+on_hide_clicked (GtkButton *button, gpointer user_data)
 {
-  GtkWidget *button = gtk_button_new_with_label (label);
+  MynaApp *self = user_data;
+  (void) button;
+
+  set_visible (self, FALSE);
+}
+
+static const char *
+display_label_for_action (const char *label, const char *action_label)
+{
+  if (g_strcmp0 (action_label, "Space") == 0)
+    return "space";
+  if (g_strcmp0 (action_label, "Enter") == 0)
+    return "return";
+  return label;
+}
+
+static GtkWidget *
+make_button (const char *label, const char *action_label, const char *style_class)
+{
+  GtkWidget *button = gtk_button_new_with_label (display_label_for_action (label, action_label));
+  GtkStyleContext *context = gtk_widget_get_style_context (button);
 
   gtk_widget_set_hexpand (button, TRUE);
   gtk_widget_set_vexpand (button, TRUE);
-  gtk_widget_set_size_request (button, 1, 42);
-  gtk_style_context_add_class (gtk_widget_get_style_context (button), "key");
+  gtk_widget_set_size_request (button, 1, 38);
+  gtk_style_context_add_class (context, "key");
+  if (style_class)
+    gtk_style_context_add_class (context, style_class);
   g_object_set_data_full (G_OBJECT (button), "myna-label", g_strdup (action_label), g_free);
 
   return button;
@@ -138,49 +202,117 @@ attach_key (GtkGrid *grid,
             const char *action_label,
             int column,
             int row,
-            int width)
+            int width,
+            const char *style_class)
 {
-  GtkWidget *button = make_button (label, action_label);
+  GtkWidget *button = make_button (label, action_label, style_class);
 
   g_signal_connect (button, "clicked", G_CALLBACK (on_key_clicked), self);
   gtk_grid_attach (grid, button, column, row, width, 1);
 }
 
 static void
+attach_row (GtkGrid *grid, MynaApp *self, const KeySpec *keys, guint n_keys, int row, int offset)
+{
+  int column = offset;
+
+  for (guint i = 0; i < n_keys; i++) {
+    attach_key (grid, self, keys[i].label, keys[i].action, column, row, keys[i].width, keys[i].style_class);
+    column += keys[i].width;
+  }
+}
+
+static void
 build_keyboard (MynaApp *self)
 {
-  static const char *row1[] = { "q", "w", "e", "r", "t", "y", "u", "i", "o", "p" };
-  static const char *row2[] = { "a", "s", "d", "f", "g", "h", "j", "k", "l" };
-  static const char *row3[] = { "z", "x", "c", "v", "b", "n", "m" };
-
   GtkWidget *grid = gtk_grid_new ();
+  self->mode_button = NULL;
+
   gtk_grid_set_row_spacing (GTK_GRID (grid), 4);
   gtk_grid_set_column_spacing (GTK_GRID (grid), 4);
   gtk_widget_set_hexpand (grid, TRUE);
   gtk_widget_set_vexpand (grid, TRUE);
 
-  for (guint i = 0; i < G_N_ELEMENTS (row1); i++)
-    attach_key (GTK_GRID (grid), self, row1[i], row1[i], i * 3, 0, 3);
+  if (self->page == LAYOUT_SYMBOLS) {
+    static const KeySpec row1[] = {
+      { "1", "1", 3, NULL }, { "2", "2", 3, NULL }, { "3", "3", 3, NULL }, { "4", "4", 3, NULL }, { "5", "5", 3, NULL },
+      { "6", "6", 3, NULL }, { "7", "7", 3, NULL }, { "8", "8", 3, NULL }, { "9", "9", 3, NULL }, { "0", "0", 3, NULL },
+    };
+    static const KeySpec row2[] = {
+      { "@", "@", 3, NULL }, { "#", "#", 3, NULL }, { "$", "$", 3, NULL }, { "_", "_", 3, NULL }, { "&", "&", 3, NULL },
+      { "-", "-", 3, NULL }, { "+", "+", 3, NULL }, { "(", "(", 3, NULL }, { ")", ")", 3, NULL },
+    };
+    static const KeySpec row3[] = {
+      { "123", "Numbers", 4, "action" }, { "*", "*", 3, NULL }, { "\"", "\"", 3, NULL }, { "'", "'", 3, NULL },
+      { ":", ":", 3, NULL }, { ";", ";", 3, NULL }, { "!", "!", 3, NULL }, { "?", "?", 3, NULL }, { "⌫", "Backspace", 5, "action" },
+    };
+    static const KeySpec row4[] = {
+      { "ABC", "Main", 5, "action" }, { ",", ",", 3, NULL }, { "space", "Space", 14, "space" }, { ".", ".", 3, NULL }, { "return", "Enter", 5, "action" },
+    };
 
-  for (guint i = 0; i < G_N_ELEMENTS (row2); i++)
-    attach_key (GTK_GRID (grid), self, row2[i], row2[i], 1 + i * 3, 1, 3);
+    attach_row (GTK_GRID (grid), self, row1, G_N_ELEMENTS (row1), 0, 0);
+    attach_row (GTK_GRID (grid), self, row2, G_N_ELEMENTS (row2), 1, 1);
+    attach_row (GTK_GRID (grid), self, row3, G_N_ELEMENTS (row3), 2, 0);
+    attach_row (GTK_GRID (grid), self, row4, G_N_ELEMENTS (row4), 3, 0);
+  } else if (self->page == LAYOUT_NUMBERS) {
+    static const KeySpec row1[] = {
+      { "1", "1", 10, NULL }, { "2", "2", 10, NULL }, { "3", "3", 10, NULL },
+    };
+    static const KeySpec row2[] = {
+      { "4", "4", 10, NULL }, { "5", "5", 10, NULL }, { "6", "6", 10, NULL },
+    };
+    static const KeySpec row3[] = {
+      { "7", "7", 10, NULL }, { "8", "8", 10, NULL }, { "9", "9", 10, NULL },
+    };
+    static const KeySpec row4[] = {
+      { "ABC", "Main", 5, "action" }, { "0", "0", 10, NULL }, { "⌫", "Backspace", 5, "action" }, { "return", "Enter", 10, "action" },
+    };
 
-  attach_key (GTK_GRID (grid), self, "Shift", "Shift", 0, 2, 4);
-  for (guint i = 0; i < G_N_ELEMENTS (row3); i++)
-    attach_key (GTK_GRID (grid), self, row3[i], row3[i], 4 + i * 3, 2, 3);
-  attach_key (GTK_GRID (grid), self, "⌫", "Backspace", 25, 2, 5);
+    attach_row (GTK_GRID (grid), self, row1, G_N_ELEMENTS (row1), 0, 0);
+    attach_row (GTK_GRID (grid), self, row2, G_N_ELEMENTS (row2), 1, 0);
+    attach_row (GTK_GRID (grid), self, row3, G_N_ELEMENTS (row3), 2, 0);
+    attach_row (GTK_GRID (grid), self, row4, G_N_ELEMENTS (row4), 3, 0);
+  } else {
+    static const KeySpec row1[] = {
+      { "q", "q", 3, NULL }, { "w", "w", 3, NULL }, { "e", "e", 3, NULL }, { "r", "r", 3, NULL }, { "t", "t", 3, NULL },
+      { "y", "y", 3, NULL }, { "u", "u", 3, NULL }, { "i", "i", 3, NULL }, { "o", "o", 3, NULL }, { "p", "p", 3, NULL },
+    };
+    static const KeySpec row2[] = {
+      { "a", "a", 3, NULL }, { "s", "s", 3, NULL }, { "d", "d", 3, NULL }, { "f", "f", 3, NULL }, { "g", "g", 3, NULL },
+      { "h", "h", 3, NULL }, { "j", "j", 3, NULL }, { "k", "k", 3, NULL }, { "l", "l", 3, NULL },
+    };
+    static const KeySpec row3[] = {
+      { "⇧", "Shift", 4, "action" }, { "z", "z", 3, NULL }, { "x", "x", 3, NULL }, { "c", "c", 3, NULL }, { "v", "v", 3, NULL },
+      { "b", "b", 3, NULL }, { "n", "n", 3, NULL }, { "m", "m", 3, NULL }, { "⌫", "Backspace", 5, "action" },
+    };
+    static const KeySpec row4[] = {
+      { "?123", "Symbols", 4, "action" }, { ",", ",", 3, NULL },
+      { "space", "Space", 11, "space" }, { ".", ".", 3, NULL }, { "return", "Enter", 5, "action" },
+    };
 
-  self->mode_button = make_button ("拼", "Mode");
-  gtk_style_context_add_class (gtk_widget_get_style_context (self->mode_button), "mode");
-  g_signal_connect (self->mode_button, "clicked", G_CALLBACK (on_mode_clicked), self);
-  gtk_grid_attach (GTK_GRID (grid), self->mode_button, 0, 3, 5, 1);
+    attach_row (GTK_GRID (grid), self, row1, G_N_ELEMENTS (row1), 0, 0);
+    attach_row (GTK_GRID (grid), self, row2, G_N_ELEMENTS (row2), 1, 1);
+    attach_row (GTK_GRID (grid), self, row3, G_N_ELEMENTS (row3), 2, 0);
 
-  attach_key (GTK_GRID (grid), self, ",", ",", 5, 3, 3);
-  attach_key (GTK_GRID (grid), self, "Space", "Space", 8, 3, 14);
-  attach_key (GTK_GRID (grid), self, ".", ".", 22, 3, 3);
-  attach_key (GTK_GRID (grid), self, "Enter", "Enter", 25, 3, 5);
+    self->mode_button = make_button ("拼", "Mode", "mode");
+    gtk_style_context_add_class (gtk_widget_get_style_context (self->mode_button), "action");
+    g_signal_connect (self->mode_button, "clicked", G_CALLBACK (on_mode_clicked), self);
+    gtk_grid_attach (GTK_GRID (grid), self->mode_button, 0, 3, 4, 1);
+    attach_row (GTK_GRID (grid), self, row4, G_N_ELEMENTS (row4), 3, 4);
+  }
 
   self->main_grid = grid;
+}
+
+static void
+rebuild_keyboard (MynaApp *self)
+{
+  if (self->main_grid)
+    gtk_widget_destroy (self->main_grid);
+
+  build_keyboard (self);
+  gtk_box_pack_start (GTK_BOX (self->keyboard_area), self->main_grid, TRUE, TRUE, 0);
+  gtk_widget_show_all (self->main_grid);
 }
 
 static void
@@ -202,7 +334,8 @@ refresh_view (MynaApp *self)
   if (!view)
     return;
 
-  gtk_button_set_label (GTK_BUTTON (self->mode_button), view->mode_label);
+  if (self->mode_button)
+    gtk_button_set_label (GTK_BUTTON (self->mode_button), view->mode_label);
   gtk_label_set_text (GTK_LABEL (self->preedit_label), view->preedit ? view->preedit : "");
   clear_container (self->candidate_box);
 
@@ -210,6 +343,8 @@ refresh_view (MynaApp *self)
     GtkWidget *button = gtk_button_new_with_label (view->candidates[i]);
     gtk_widget_set_hexpand (button, TRUE);
     gtk_style_context_add_class (gtk_widget_get_style_context (button), "candidate");
+    if (i == 0)
+      gtk_style_context_add_class (gtk_widget_get_style_context (button), "candidate-primary");
     g_object_set_data (G_OBJECT (button), "myna-index", GSIZE_TO_POINTER (i));
     g_signal_connect (button, "clicked", G_CALLBACK (on_candidate_clicked), self);
     gtk_box_pack_start (GTK_BOX (self->candidate_box), button, TRUE, TRUE, 0);
@@ -379,12 +514,18 @@ static void
 install_css (void)
 {
   static const char css[] =
-    "window { background: #202124; }"
-    ".root { padding: 6px; }"
-    ".candidate-strip { min-height: 38px; }"
-    ".preedit { color: #f4f0e8; font-size: 15px; padding: 0 8px; }"
-    ".candidate { border-radius: 4px; margin: 0 2px; padding: 5px 8px; font-size: 18px; }"
-    ".key { border-radius: 4px; margin: 0; padding: 0; font-size: 18px; }"
+    "window { background: #2b2b2f; }"
+    ".root { padding: 6px 7px 8px 7px; }"
+    ".candidate-strip { min-height: 40px; padding-bottom: 2px; }"
+    ".preedit { color: #f6f2ea; font-size: 15px; padding: 0 8px; min-width: 52px; }"
+    ".candidate { border-radius: 4px; margin: 0 2px; padding: 5px 8px; font-size: 18px; background: transparent; color: #f5f5f5; border: 0; box-shadow: none; }"
+    ".candidate-primary { background: #e9e2d0; color: #1d1d1f; font-weight: 700; }"
+    ".hide-key { min-width: 34px; color: #d8d8d8; }"
+    ".key { border-radius: 5px; margin: 0; padding: 0; font-size: 18px; min-height: 38px; background: #f2f0ea; color: #1f1f23; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.35); }"
+    ".key:active { background: #d8d3c8; }"
+    ".action { background: #6f737b; color: #ffffff; font-size: 15px; }"
+    ".action:active { background: #858a93; }"
+    ".space { font-size: 14px; }"
     ".mode { font-weight: 700; }";
   GtkCssProvider *provider = gtk_css_provider_new ();
 
@@ -434,8 +575,18 @@ activate (GtkApplication *app, gpointer user_data)
   gtk_widget_set_hexpand (self->candidate_box, TRUE);
   gtk_box_pack_start (GTK_BOX (candidate_row), self->candidate_box, TRUE, TRUE, 0);
 
+  GtkWidget *hide_button = gtk_button_new_with_label ("⌄");
+  gtk_style_context_add_class (gtk_widget_get_style_context (hide_button), "candidate");
+  gtk_style_context_add_class (gtk_widget_get_style_context (hide_button), "hide-key");
+  g_signal_connect (hide_button, "clicked", G_CALLBACK (on_hide_clicked), self);
+  gtk_box_pack_start (GTK_BOX (candidate_row), hide_button, FALSE, FALSE, 0);
+
   build_keyboard (self);
-  gtk_box_pack_start (GTK_BOX (root), self->main_grid, TRUE, TRUE, 0);
+  self->keyboard_area = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  gtk_widget_set_hexpand (self->keyboard_area, TRUE);
+  gtk_widget_set_vexpand (self->keyboard_area, TRUE);
+  gtk_box_pack_start (GTK_BOX (root), self->keyboard_area, TRUE, TRUE, 0);
+  gtk_box_pack_start (GTK_BOX (self->keyboard_area), self->main_grid, TRUE, TRUE, 0);
 
   refresh_view (self);
   set_visible (self, self->show_on_start);
