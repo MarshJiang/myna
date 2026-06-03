@@ -3,6 +3,7 @@ project(
   ['c', 'rust'],
   version: '0.1.0',
   license: 'GPL-3.0-or-later',
+  meson_version: '>= 1.3.0',
   default_options: [
     'warning_level=2',
     'c_std=gnu11',

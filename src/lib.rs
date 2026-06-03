@@ -241,7 +241,7 @@ pub unsafe extern "C" fn myna_keyboard_view(kbd: *mut Keyboard) -> *mut MynaView
 
     let mut candidates = Vec::new();
     if kbd.mode == MynaMode::Pinyin && !kbd.rime.is_null() {
-        let count = myna_rime_get_candidate_count(kbd.rime).min(8);
+        let count = myna_rime_get_candidate_count(kbd.rime).min(24);
         for index in 0..count {
             let candidate = myna_rime_get_candidate(kbd.rime, index);
             if !candidate.is_null() {
