@@ -87,6 +87,7 @@ static const char introspection_xml[] =
 static void refresh_view (MynaApp *self);
 static void rebuild_keyboard (MynaApp *self);
 static void set_visible (MynaApp *self, gboolean visible);
+static gboolean relayout_keyboard_idle (gpointer user_data);
 
 static int
 panel_height_for_screen (void)
@@ -96,14 +97,14 @@ panel_height_for_screen (void)
   GdkRectangle geometry;
 
   if (!monitor)
-    return 280;
+    return 320;
 
   gdk_monitor_get_geometry (monitor, &geometry);
 
   if (geometry.height <= 720)
-    return MAX (220, geometry.height * 36 / 100);
+    return CLAMP (geometry.height * 40 / 100, 286, 324);
 
-  return CLAMP (geometry.height * 30 / 100, 260, 360);
+  return CLAMP (geometry.height * 33 / 100, 304, 364);
 }
 
 static void
@@ -370,6 +371,10 @@ add_logical_row (MynaApp *self,
     placed->height = key_height;
     g_ptr_array_add (self->placed_keys, placed);
     gtk_fixed_put (fixed, button, 0, 0);
+    if (g_strcmp0 (keys[i].action, "Mode") == 0) {
+      self->mode_button = button;
+      gtk_style_context_add_class (gtk_widget_get_style_context (button), "action");
+    }
 
     x += keys[i].width;
   }
@@ -397,9 +402,10 @@ layout_keyboard_buttons (MynaApp *self, GtkAllocation *allocation)
   double scale_y_final;
   double origin_x;
   double origin_y;
-  const double gap = 4.0;
 
   if (!self->placed_keys || self->layout_width <= 0.0 || self->layout_height <= 0.0)
+    return;
+  if (allocation->width < 32 || allocation->height < 32)
     return;
 
   h_scale = allocation->width / self->layout_width;
@@ -413,10 +419,10 @@ layout_keyboard_buttons (MynaApp *self, GtkAllocation *allocation)
 
   for (guint i = 0; i < self->placed_keys->len; i++) {
     PlacedKey *key = g_ptr_array_index (self->placed_keys, i);
-    int x = (int) (origin_x + (key->x + gap) * scale_x_final);
-    int y = (int) (origin_y + (key->y + gap) * scale_y_final);
-    int width = MAX (1, (int) ((key->width - gap * 2.0) * scale_x_final));
-    int height = MAX (1, (int) ((key->height - gap * 2.0) * scale_y_final));
+    int x = (int) (origin_x + key->x * scale_x_final);
+    int y = (int) (origin_y + key->y * scale_y_final);
+    int width = MAX (1, (int) (key->width * scale_x_final));
+    int height = MAX (1, (int) (key->height * scale_y_final));
 
     gtk_widget_set_size_request (key->button, width, height);
     gtk_fixed_move (GTK_FIXED (self->keyboard_fixed), key->button, x, y);
@@ -430,6 +436,22 @@ on_keyboard_size_allocate (GtkWidget *widget, GtkAllocation *allocation, gpointe
   (void) widget;
 
   layout_keyboard_buttons (self, allocation);
+}
+
+static gboolean
+relayout_keyboard_idle (gpointer user_data)
+{
+  MynaApp *self = user_data;
+  GtkAllocation allocation;
+
+  if (!self->keyboard_fixed || !gtk_widget_get_visible (self->keyboard_fixed))
+    return G_SOURCE_REMOVE;
+
+  gtk_widget_get_allocation (self->keyboard_fixed, &allocation);
+  layout_keyboard_buttons (self, &allocation);
+  gtk_widget_queue_draw (self->keyboard_fixed);
+
+  return G_SOURCE_REMOVE;
 }
 
 static void
@@ -502,29 +524,15 @@ build_keyboard (MynaApp *self)
       { "b", "b", 35.33, NULL }, { "n", "n", 35.33, NULL }, { "m", "m", 35.33, NULL }, { "⌫", "Backspace", 52.67, "action" },
     };
     static const KeySpec row4[] = {
-      { "?123", "Symbols", 62.0, "action" }, { ",", ",", 44.0, NULL },
+      { "?123", "Symbols", 62.0, "action" }, { "拼", "Mode", 44.0, "mode" },
       { "space", "Space", 142.0, "space" }, { ".", ".", 44.0, NULL }, { "return", "Enter", 62.0, "action" },
     };
     const KeySpec *rows[] = { row1, row2, row3, row4 };
     const guint counts[] = { G_N_ELEMENTS (row1), G_N_ELEMENTS (row2), G_N_ELEMENTS (row3), G_N_ELEMENTS (row4) };
     for (guint i = 0; i < 4; i++)
       self->layout_width = MAX (self->layout_width, row_width (rows[i], counts[i]));
-    self->layout_width = MAX (self->layout_width, 44.0 + row_width (row4, G_N_ELEMENTS (row4)));
-    for (guint i = 0; i < 3; i++)
+    for (guint i = 0; i < 4; i++)
       add_logical_row (self, GTK_FIXED (fixed), rows[i], counts[i], i * (key_height + row_gap), row_width (rows[i], counts[i]), 0.0, key_height);
-
-    self->mode_button = create_key_button (self, "拼", "Mode", "mode");
-    gtk_style_context_add_class (gtk_widget_get_style_context (self->mode_button), "action");
-    gtk_fixed_put (GTK_FIXED (fixed), self->mode_button, 0, 0);
-    PlacedKey *mode = g_new0 (PlacedKey, 1);
-    mode->button = self->mode_button;
-    mode->x = (self->layout_width - (44.0 + row_width (row4, G_N_ELEMENTS (row4)))) / 2.0;
-    mode->y = 3 * (key_height + row_gap);
-    mode->width = 44.0;
-    mode->height = key_height;
-    g_ptr_array_add (self->placed_keys, mode);
-
-    add_logical_row (self, GTK_FIXED (fixed), row4, G_N_ELEMENTS (row4), 3 * (key_height + row_gap), 44.0 + row_width (row4, G_N_ELEMENTS (row4)), 44.0, key_height);
   }
 
   self->keyboard_fixed = fixed;
@@ -691,6 +699,12 @@ set_visible (MynaApp *self, gboolean visible)
   else
     gtk_widget_hide (self->window);
 
+  if (visible && self->keyboard_fixed) {
+    gtk_widget_queue_resize (self->keyboard_area);
+    gtk_widget_queue_resize (self->keyboard_fixed);
+    g_idle_add (relayout_keyboard_idle, self);
+  }
+
   g_message ("OSK visibility set to %s", visible ? "true" : "false");
 
   if (self->bus) {
@@ -852,7 +866,7 @@ install_css (void)
     ".candidate-cell { border-radius: 5px; margin: 2px; padding: 5px 8px; font-size: 18px; min-height: 42px; }"
     ".candidate-small { font-size: 15px; }"
     ".candidate-tiny { font-size: 13px; }"
-    ".key { border-radius: 5px; margin: 0; padding: 0; font-size: 18px; min-height: 38px; background: #f2f0ea; color: #1f1f23; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.35); }"
+    ".key { border-radius: 4px; margin: 2px; padding: 0; font-size: 18px; min-height: 38px; background: #f2f0ea; color: #1f1f23; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.35); }"
     ".key:active { background: #d8d3c8; }"
     ".action { background: #6f737b; color: #ffffff; font-size: 15px; }"
     ".action:active { background: #858a93; }"
@@ -927,7 +941,7 @@ activate (GtkApplication *app, gpointer user_data)
   gtk_stack_set_transition_type (GTK_STACK (self->keyboard_area), GTK_STACK_TRANSITION_TYPE_NONE);
   gtk_widget_set_hexpand (self->keyboard_area, TRUE);
   gtk_widget_set_vexpand (self->keyboard_area, FALSE);
-  gtk_widget_set_size_request (self->keyboard_area, 1, MAX (200, height - 66));
+  gtk_widget_set_size_request (self->keyboard_area, 1, MAX (224, height - 58));
   gtk_box_pack_start (GTK_BOX (root), self->keyboard_area, TRUE, TRUE, 0);
   gtk_stack_add_named (GTK_STACK (self->keyboard_area), self->keyboard_fixed, "keyboard");
 
