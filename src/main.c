@@ -50,8 +50,7 @@ struct _MynaApp {
   GtkWidget *keyboard_fixed;
   GtkWidget *keyboard_area;
   GPtrArray *placed_keys;
-  double layout_width;
-  double layout_height;
+  MynaLayoutSnapshot *layout_snapshot;
   GDBusNodeInfo *introspection;
   GDBusConnection *bus;
   guint registration_id;
@@ -88,16 +87,33 @@ panel_height_for_screen (void)
   GdkDisplay *display = gdk_display_get_default ();
   GdkMonitor *monitor = gdk_display_get_primary_monitor (display);
   GdkRectangle geometry;
+  int scale;
+  int logical_width;
+  int logical_height;
+  int height;
 
-  if (!monitor)
+  if (!monitor && gdk_display_get_n_monitors (display) > 0)
+    monitor = gdk_display_get_monitor (display, 0);
+  if (!monitor) {
+    g_warning ("No monitor available for panel sizing; using fallback height 320");
     return 320;
+  }
 
   gdk_monitor_get_geometry (monitor, &geometry);
+  scale = MAX (1, gdk_monitor_get_scale_factor (monitor));
+  logical_width = geometry.width / scale;
+  logical_height = geometry.height / scale;
+  height = CLAMP (logical_width * 280 / 360, 280, 336);
 
-  if (geometry.height <= 720)
-    return CLAMP (geometry.height * 40 / 100, 286, 324);
+  g_message ("Panel height: monitor=%dx%d scale=%d logical=%dx%d height=%d",
+             geometry.width,
+             geometry.height,
+             scale,
+             logical_width,
+             logical_height,
+             height);
 
-  return CLAMP (geometry.height * 33 / 100, 304, 364);
+  return height;
 }
 
 static void
@@ -137,8 +153,10 @@ static void
 handle_key_action (MynaApp *self, const char *label)
 {
   handle_action (self, myna_keyboard_press_label (self->keyboard, label));
-  if (g_strcmp0 (label, "Mode") == 0)
+  if (g_strcmp0 (label, "Mode") == 0) {
     rebuild_keyboard (self);
+    refresh_view (self);
+  }
 }
 
 static void
@@ -324,7 +342,7 @@ make_button (const char *label, const char *action_label, const char *style_clas
   gtk_widget_set_vexpand (button, TRUE);
   gtk_widget_set_can_focus (button, FALSE);
   gtk_widget_set_focus_on_click (button, FALSE);
-  gtk_widget_set_size_request (button, 1, 38);
+  gtk_widget_set_size_request (button, 1, 1);
   gtk_style_context_add_class (context, "key");
   if (style_class && *style_class)
     gtk_style_context_add_class (context, style_class);
@@ -397,9 +415,6 @@ build_keyboard_from_snapshot (MynaApp *self,
   if (size.width <= 0.0 || size.height <= 0.0 || count == 0)
     return FALSE;
 
-  self->layout_width = size.width;
-  self->layout_height = size.height;
-
   for (size_t i = 0; i < count; i++)
     add_snapshot_key (self, fixed, myna_layout_key_at (snapshot, i));
 
@@ -409,35 +424,23 @@ build_keyboard_from_snapshot (MynaApp *self,
 static void
 layout_keyboard_buttons (MynaApp *self, GtkAllocation *allocation)
 {
-  double scale_x;
-  double scale_y;
-  double h_scale;
-  double v_scale;
-  double scale_x_final;
-  double scale_y_final;
-  double origin_x;
-  double origin_y;
+  MynaLayoutTransform transform;
 
-  if (!self->placed_keys || self->layout_width <= 0.0 || self->layout_height <= 0.0)
+  if (!self->placed_keys || !self->layout_snapshot)
     return;
   if (allocation->width < 32 || allocation->height < 32)
     return;
 
-  h_scale = allocation->width / self->layout_width;
-  v_scale = allocation->height / self->layout_height;
-  scale_x = (h_scale / v_scale) < 1.055 ? h_scale : v_scale;
-  scale_y = MIN (h_scale, v_scale);
-  scale_x_final = scale_x;
-  scale_y_final = scale_y;
-  origin_x = (allocation->width - self->layout_width * scale_x_final) / 2.0;
-  origin_y = (allocation->height - self->layout_height * scale_y_final) / 2.0;
+  transform = myna_layout_transform (self->layout_snapshot, allocation->width, allocation->height);
+  if (transform.scale_x <= 0.0 || transform.scale_y <= 0.0)
+    return;
 
   for (guint i = 0; i < self->placed_keys->len; i++) {
     PlacedKey *key = g_ptr_array_index (self->placed_keys, i);
-    int x = (int) (origin_x + key->x * scale_x_final);
-    int y = (int) (origin_y + key->y * scale_y_final);
-    int width = MAX (1, (int) (key->width * scale_x_final));
-    int height = MAX (1, (int) (key->height * scale_y_final));
+    int x = (int) (transform.origin_x + key->x * transform.scale_x);
+    int y = (int) (transform.origin_y + key->y * transform.scale_y);
+    int width = MAX (1, (int) (key->width * transform.scale_x));
+    int height = MAX (1, (int) (key->height * transform.scale_y));
 
     gtk_widget_set_size_request (key->button, width, height);
     gtk_fixed_move (GTK_FIXED (self->keyboard_fixed), key->button, x, y);
@@ -469,7 +472,7 @@ relayout_keyboard_idle (gpointer user_data)
     GtkAllocation window_allocation;
     gtk_widget_get_allocation (self->window, &window_allocation);
     allocation.width = window_allocation.width;
-    allocation.height = MAX (224, window_allocation.height - 58);
+    allocation.height = CLAMP (window_allocation.height - 58, 206, 264);
   }
   layout_keyboard_buttons (self, &allocation);
   gtk_widget_queue_draw (self->keyboard_fixed);
@@ -487,8 +490,7 @@ build_keyboard (MynaApp *self)
   self->mode_button = NULL;
   g_clear_pointer (&self->placed_keys, g_ptr_array_unref);
   self->placed_keys = g_ptr_array_new_with_free_func (placed_key_free);
-  self->layout_width = 0.0;
-  self->layout_height = 0.0;
+  g_clear_pointer (&self->layout_snapshot, myna_layout_snapshot_free);
 
   gtk_widget_set_hexpand (fixed, TRUE);
   gtk_widget_set_vexpand (fixed, TRUE);
@@ -501,7 +503,7 @@ build_keyboard (MynaApp *self)
   snapshot = myna_layout_page_for_mode_new (page, myna_keyboard_mode (self->keyboard));
   if (!build_keyboard_from_snapshot (self, GTK_FIXED (fixed), snapshot))
     g_warning ("Failed to build keyboard from Rust layout snapshot");
-  myna_layout_snapshot_free (snapshot);
+  self->layout_snapshot = snapshot;
 
   self->keyboard_fixed = fixed;
 }
@@ -832,24 +834,26 @@ static void
 install_css (void)
 {
   static const char css[] =
-    "window { background: #2b2b2f; }"
-    ".root { padding: 6px 7px 8px 7px; }"
-    ".candidate-strip { min-height: 40px; padding-bottom: 2px; }"
-    ".preedit { color: #f6f2ea; font-size: 15px; padding: 0 8px; min-width: 52px; }"
-    ".candidate { border-radius: 4px; margin: 0 2px; padding: 5px 8px; font-size: 18px; background: transparent; color: #f5f5f5; border: 0; box-shadow: none; }"
-    ".candidate-primary { background: #e9e2d0; color: #1d1d1f; font-weight: 700; }"
-    ".candidate-toggle { min-width: 34px; color: #d8d8d8; }"
-    ".hide-key { min-width: 34px; color: #d8d8d8; }"
-    ".candidate-cell { border-radius: 5px; margin: 2px; padding: 5px 8px; font-size: 18px; min-height: 42px; }"
+    "window { background: #303136; }"
+    ".root { padding: 7px 8px 8px 8px; }"
+    ".candidate-strip { min-height: 38px; padding: 0 1px 2px 1px; }"
+    ".preedit { color: #f3f4f6; font-size: 15px; padding: 0 8px; min-width: 52px; font-weight: 600; }"
+    ".candidate { border-radius: 4px; margin: 0 2px; padding: 5px 9px; font-size: 18px; background: transparent; color: #f4f5f7; border: 0; box-shadow: none; }"
+    ".candidate:active { background: rgba(255,255,255,0.12); }"
+    ".candidate-primary { background: #f0f2f5; color: #202124; font-weight: 700; }"
+    ".candidate-toggle { min-width: 34px; color: #e5e7eb; padding-left: 6px; padding-right: 6px; }"
+    ".hide-key { min-width: 34px; color: #e5e7eb; }"
+    ".candidate-cell { border-radius: 4px; margin: 2px; padding: 6px 8px; font-size: 18px; min-height: 42px; background: #f0f2f5; color: #202124; border: 0; }"
+    ".candidate-cell:active { background: #dfe3e8; }"
     ".candidate-small { font-size: 15px; }"
     ".candidate-tiny { font-size: 13px; }"
-    ".key { border-radius: 4px; margin: 2px; padding: 0; font-size: 18px; min-height: 38px; background: #f2f0ea; color: #1f1f23; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.35); }"
-    ".key:active { background: #d8d3c8; }"
-    ".action { background: #6f737b; color: #ffffff; font-size: 15px; }"
-    ".action:active { background: #858a93; }"
+    ".key { border-radius: 4px; margin: 2px; padding: 0; font-size: 18px; min-height: 0; background: #f4f5f7; color: #202124; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.38); }"
+    ".key:active { background: #dfe3e8; }"
+    ".action { background: #747982; color: #ffffff; font-size: 15px; }"
+    ".action:active { background: #8a9099; }"
     ".alternate { border-radius: 4px; min-width: 40px; min-height: 36px; font-size: 18px; }"
-    ".space { font-size: 14px; }"
-    ".mode { font-weight: 700; }";
+    ".space { font-size: 14px; color: #5f6368; }"
+    ".mode { font-weight: 700; color: #1f2937; }";
   GtkCssProvider *provider = gtk_css_provider_new ();
 
   gtk_css_provider_load_from_data (provider, css, -1, NULL);
@@ -867,6 +871,7 @@ activate (GtkApplication *app, gpointer user_data)
   GtkWidget *root;
   GtkWidget *candidate_row;
   int height;
+  int keyboard_height;
 
   self->app = app;
   self->started = TRUE;
@@ -877,14 +882,15 @@ activate (GtkApplication *app, gpointer user_data)
 
   install_css ();
   height = panel_height_for_screen ();
+  keyboard_height = CLAMP (height - 58, 206, 264);
   self->window = myna_layer_surface_new (self->wayland.layer_shell, self->wayland.output, height);
   gtk_application_add_window (app, GTK_WINDOW (self->window));
 
-  root = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+  root = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
   gtk_style_context_add_class (gtk_widget_get_style_context (root), "root");
   gtk_container_add (GTK_CONTAINER (self->window), root);
 
-  candidate_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+  candidate_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
   gtk_style_context_add_class (gtk_widget_get_style_context (candidate_row), "candidate-strip");
   gtk_widget_set_hexpand (candidate_row, TRUE);
   gtk_box_pack_start (GTK_BOX (root), candidate_row, FALSE, TRUE, 0);
@@ -909,8 +915,8 @@ activate (GtkApplication *app, gpointer user_data)
   gtk_box_pack_start (GTK_BOX (candidate_row), self->candidate_toggle_button, FALSE, FALSE, 0);
 
   self->candidate_box = gtk_grid_new ();
-  gtk_grid_set_row_spacing (GTK_GRID (self->candidate_box), 3);
-  gtk_grid_set_column_spacing (GTK_GRID (self->candidate_box), 3);
+  gtk_grid_set_row_spacing (GTK_GRID (self->candidate_box), 4);
+  gtk_grid_set_column_spacing (GTK_GRID (self->candidate_box), 4);
   gtk_widget_set_hexpand (self->candidate_box, TRUE);
   gtk_container_add (GTK_CONTAINER (self->candidate_scroller), self->candidate_box);
 
@@ -920,13 +926,13 @@ activate (GtkApplication *app, gpointer user_data)
   gtk_stack_set_transition_type (GTK_STACK (self->keyboard_area), GTK_STACK_TRANSITION_TYPE_NONE);
   gtk_widget_set_hexpand (self->keyboard_area, TRUE);
   gtk_widget_set_vexpand (self->keyboard_area, FALSE);
-  gtk_widget_set_size_request (self->keyboard_area, 1, MAX (224, height - 58));
+  gtk_widget_set_size_request (self->keyboard_area, 1, keyboard_height);
   gtk_box_pack_start (GTK_BOX (root), self->keyboard_area, TRUE, TRUE, 0);
   gtk_stack_add_named (GTK_STACK (self->keyboard_area), self->keyboard_fixed, "keyboard");
 
   self->candidate_panel = gtk_grid_new ();
-  gtk_grid_set_row_spacing (GTK_GRID (self->candidate_panel), 4);
-  gtk_grid_set_column_spacing (GTK_GRID (self->candidate_panel), 4);
+  gtk_grid_set_row_spacing (GTK_GRID (self->candidate_panel), 5);
+  gtk_grid_set_column_spacing (GTK_GRID (self->candidate_panel), 5);
   gtk_widget_set_hexpand (self->candidate_panel, TRUE);
   gtk_widget_set_vexpand (self->candidate_panel, FALSE);
   gtk_widget_set_valign (self->candidate_panel, GTK_ALIGN_START);
@@ -984,6 +990,8 @@ main (int argc, char **argv)
   g_clear_object (&self.bus);
   g_clear_pointer (&self.introspection, g_dbus_node_info_unref);
   g_clear_pointer (&self.session_client_id, g_free);
+  g_clear_pointer (&self.layout_snapshot, myna_layout_snapshot_free);
+  g_clear_pointer (&self.placed_keys, g_ptr_array_unref);
   g_bus_unown_name (bus_id);
   myna_keyboard_free (self.keyboard);
   myna_wayland_destroy (&self.wayland);

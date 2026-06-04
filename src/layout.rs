@@ -65,6 +65,7 @@ pub const ALTLINE_WIDTH: f64 = 52.67;
 pub const WIDE_WIDTH: f64 = 62.0;
 pub const SPACELINE_WIDTH: f64 = 142.0;
 pub const SPECIAL_WIDTH: f64 = 44.0;
+const MAX_HORIZONTAL_STRETCH: f64 = 1.18;
 
 impl Row {
     pub fn new(keys: Vec<Key>) -> Self {
@@ -142,10 +143,10 @@ impl Layout {
         let size = self.size();
         let h_scale = available.width / size.width;
         let v_scale = available.height / size.height;
-        let scale_x = if (h_scale / v_scale) < 1.055 {
+        let scale_x = if (h_scale / v_scale) < MAX_HORIZONTAL_STRETCH {
             h_scale
         } else {
-            v_scale
+            v_scale * MAX_HORIZONTAL_STRETCH
         };
         let scale_y = h_scale.min(v_scale);
 
@@ -315,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn transformation_matches_squeekboard_stretch_rule() {
+    fn transformation_allows_phone_width_stretching() {
         let layout = Layout {
             views: vec![us_base_view()],
             margins: Margins {
@@ -333,5 +334,25 @@ mod tests {
         assert!(transform.scale_x > 0.0);
         assert!(transform.scale_y > 0.0);
         assert!(transform.scale_x >= transform.scale_y);
+    }
+
+    #[test]
+    fn transformation_caps_extreme_horizontal_stretching() {
+        let layout = Layout {
+            views: vec![us_base_view()],
+            margins: Margins {
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: 0.0,
+            },
+        };
+        let transform = layout.transformation(Size {
+            width: 700.0,
+            height: 208.0,
+        });
+
+        assert!((transform.scale_x - MAX_HORIZONTAL_STRETCH).abs() < 0.001);
+        assert!((transform.scale_y - 1.0).abs() < 0.001);
     }
 }
