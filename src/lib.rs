@@ -395,8 +395,18 @@ pub extern "C" fn myna_layout_us_base_new() -> *mut MynaLayoutSnapshot {
 
 #[no_mangle]
 pub extern "C" fn myna_layout_page_new(page: MynaLayoutPage) -> *mut MynaLayoutSnapshot {
+    myna_layout_page_for_mode_new(page, MynaMode::Pinyin)
+}
+
+#[no_mangle]
+pub extern "C" fn myna_layout_page_for_mode_new(
+    page: MynaLayoutPage,
+    mode: MynaMode,
+) -> *mut MynaLayoutSnapshot {
     let view = match page {
+        MynaLayoutPage::Main if mode == MynaMode::Pinyin => layout::pinyin_base_view(),
         MynaLayoutPage::Main => layout::us_base_view(),
+        MynaLayoutPage::Symbols if mode == MynaMode::Pinyin => layout::pinyin_symbols_view(),
         MynaLayoutPage::Symbols => layout::symbols_view(),
         MynaLayoutPage::Numbers => layout::numbers_view(),
     };

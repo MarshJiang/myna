@@ -65,6 +65,8 @@ void        myna_string_free               (char *value);
 
 MynaLayoutSnapshot  *myna_layout_us_base_new       (void);
 MynaLayoutSnapshot  *myna_layout_page_new          (MynaLayoutPage page);
+MynaLayoutSnapshot  *myna_layout_page_for_mode_new (MynaLayoutPage page,
+                                                    MynaMode mode);
 void                 myna_layout_snapshot_free     (MynaLayoutSnapshot *snapshot);
 size_t               myna_layout_key_count         (const MynaLayoutSnapshot *snapshot);
 MynaLayoutSize       myna_layout_size              (const MynaLayoutSnapshot *snapshot);

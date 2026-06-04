@@ -134,6 +134,14 @@ handle_action (MynaApp *self, MynaAction *action)
 }
 
 static void
+handle_key_action (MynaApp *self, const char *label)
+{
+  handle_action (self, myna_keyboard_press_label (self->keyboard, label));
+  if (g_strcmp0 (label, "Mode") == 0)
+    rebuild_keyboard (self);
+}
+
+static void
 set_page (MynaApp *self, LayoutPage page)
 {
   self->page = page;
@@ -169,7 +177,7 @@ on_key_clicked (GtkButton *button, gpointer user_data)
     return;
   }
 
-  handle_action (self, myna_keyboard_press_label (self->keyboard, label));
+  handle_key_action (self, label);
 }
 
 static void
@@ -490,7 +498,7 @@ build_keyboard (MynaApp *self)
   else if (self->page == LAYOUT_NUMBERS)
     page = MYNA_LAYOUT_PAGE_NUMBERS;
 
-  snapshot = myna_layout_page_new (page);
+  snapshot = myna_layout_page_for_mode_new (page, myna_keyboard_mode (self->keyboard));
   if (!build_keyboard_from_snapshot (self, GTK_FIXED (fixed), snapshot))
     g_warning ("Failed to build keyboard from Rust layout snapshot");
   myna_layout_snapshot_free (snapshot);
