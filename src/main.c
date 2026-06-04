@@ -17,13 +17,6 @@ typedef enum {
 typedef struct _MynaApp MynaApp;
 
 typedef struct {
-  const char *label;
-  const char *action;
-  double width;
-  const char *style_class;
-} KeySpec;
-
-typedef struct {
   GtkWidget *button;
   double x;
   double y;
@@ -114,14 +107,16 @@ submit_text (MynaApp *self, const char *text)
     return;
 
   if (text[0] == '\b' && text[1] == '\0') {
+    myna_wayland_ensure_input_method (&self->wayland);
     if (!myna_wayland_delete_before (&self->wayland, 1) &&
         !myna_wayland_send_backspace (&self->wayland))
       g_warning ("Backspace requested but neither surrounding-text deletion nor virtual keyboard was available");
     return;
   }
 
+  myna_wayland_ensure_input_method (&self->wayland);
   if (!myna_wayland_commit_string (&self->wayland, text))
-    g_warning ("Commit requested while input-method-v2 is inactive: %s", text);
+    g_warning ("Commit requested but input-method-v2 could not accept text: %s", text);
 }
 
 static void
@@ -288,6 +283,8 @@ on_key_long_pressed (GtkGestureLongPress *gesture,
   items = g_strsplit (alternates, " ", -1);
   for (guint i = 0; items[i]; i++) {
     GtkWidget *alt = gtk_button_new_with_label (items[i]);
+    gtk_widget_set_can_focus (alt, FALSE);
+    gtk_widget_set_focus_on_click (alt, FALSE);
     gtk_style_context_add_class (gtk_widget_get_style_context (alt), "alternate");
     g_signal_connect (alt, "clicked", G_CALLBACK (on_alternate_clicked), self);
     g_signal_connect_swapped (alt, "clicked", G_CALLBACK (gtk_widget_destroy), popover);
@@ -317,9 +314,11 @@ make_button (const char *label, const char *action_label, const char *style_clas
 
   gtk_widget_set_hexpand (button, TRUE);
   gtk_widget_set_vexpand (button, TRUE);
+  gtk_widget_set_can_focus (button, FALSE);
+  gtk_widget_set_focus_on_click (button, FALSE);
   gtk_widget_set_size_request (button, 1, 38);
   gtk_style_context_add_class (context, "key");
-  if (style_class)
+  if (style_class && *style_class)
     gtk_style_context_add_class (context, style_class);
   g_object_set_data_full (G_OBJECT (button), "myna-label", g_strdup (action_label), g_free);
 
@@ -349,46 +348,54 @@ placed_key_free (gpointer data)
 }
 
 static void
-add_logical_row (MynaApp *self,
-                 GtkFixed *fixed,
-                 const KeySpec *keys,
-                 guint n_keys,
-                 double y,
-                 double row_width,
-                 double leading_width,
-                 double key_height)
+add_snapshot_key (MynaApp *self, GtkFixed *fixed, MynaLayoutKey key)
 {
-  double x = (self->layout_width - row_width) / 2.0 + leading_width;
+  GtkWidget *button;
+  PlacedKey *placed;
 
-  for (guint i = 0; i < n_keys; i++) {
-    GtkWidget *button = create_key_button (self, keys[i].label, keys[i].action, keys[i].style_class);
-    PlacedKey *placed = g_new0 (PlacedKey, 1);
+  if (!key.label || !key.action)
+    return;
 
-    placed->button = button;
-    placed->x = x;
-    placed->y = y;
-    placed->width = keys[i].width;
-    placed->height = key_height;
-    g_ptr_array_add (self->placed_keys, placed);
-    gtk_fixed_put (fixed, button, 0, 0);
-    if (g_strcmp0 (keys[i].action, "Mode") == 0) {
-      self->mode_button = button;
-      gtk_style_context_add_class (gtk_widget_get_style_context (button), "action");
-    }
+  button = create_key_button (self, key.label, key.action, key.class_name);
+  placed = g_new0 (PlacedKey, 1);
 
-    x += keys[i].width;
+  placed->button = button;
+  placed->x = key.x;
+  placed->y = key.y;
+  placed->width = key.width;
+  placed->height = key.height;
+  g_ptr_array_add (self->placed_keys, placed);
+  gtk_fixed_put (fixed, button, (int) key.x, (int) key.y);
+
+  if (g_strcmp0 (key.action, "Mode") == 0) {
+    self->mode_button = button;
+    gtk_style_context_add_class (gtk_widget_get_style_context (button), "action");
   }
 }
 
-static double
-row_width (const KeySpec *keys, guint n_keys)
+static gboolean
+build_keyboard_from_snapshot (MynaApp *self,
+                              GtkFixed *fixed,
+                              MynaLayoutSnapshot *snapshot)
 {
-  double width = 0.0;
+  MynaLayoutSize size;
+  size_t count;
 
-  for (guint i = 0; i < n_keys; i++)
-    width += keys[i].width;
+  if (!snapshot)
+    return FALSE;
 
-  return width;
+  size = myna_layout_size (snapshot);
+  count = myna_layout_key_count (snapshot);
+  if (size.width <= 0.0 || size.height <= 0.0 || count == 0)
+    return FALSE;
+
+  self->layout_width = size.width;
+  self->layout_height = size.height;
+
+  for (size_t i = 0; i < count; i++)
+    add_snapshot_key (self, fixed, myna_layout_key_at (snapshot, i));
+
+  return TRUE;
 }
 
 static void
@@ -448,6 +455,14 @@ relayout_keyboard_idle (gpointer user_data)
     return G_SOURCE_REMOVE;
 
   gtk_widget_get_allocation (self->keyboard_fixed, &allocation);
+  if ((allocation.width < 32 || allocation.height < 32) && self->keyboard_area)
+    gtk_widget_get_allocation (self->keyboard_area, &allocation);
+  if ((allocation.width < 32 || allocation.height < 32) && self->window) {
+    GtkAllocation window_allocation;
+    gtk_widget_get_allocation (self->window, &window_allocation);
+    allocation.width = window_allocation.width;
+    allocation.height = MAX (224, window_allocation.height - 58);
+  }
   layout_keyboard_buttons (self, &allocation);
   gtk_widget_queue_draw (self->keyboard_fixed);
 
@@ -458,82 +473,27 @@ static void
 build_keyboard (MynaApp *self)
 {
   GtkWidget *fixed = gtk_fixed_new ();
-  const double key_height = 52.0;
-  const double row_gap = 4.0;
+  MynaLayoutPage page = MYNA_LAYOUT_PAGE_MAIN;
+  MynaLayoutSnapshot *snapshot;
+
   self->mode_button = NULL;
   g_clear_pointer (&self->placed_keys, g_ptr_array_unref);
   self->placed_keys = g_ptr_array_new_with_free_func (placed_key_free);
   self->layout_width = 0.0;
-  self->layout_height = key_height * 4.0 + row_gap * 3.0;
+  self->layout_height = 0.0;
 
   gtk_widget_set_hexpand (fixed, TRUE);
   gtk_widget_set_vexpand (fixed, TRUE);
 
-  if (self->page == LAYOUT_SYMBOLS) {
-    static const KeySpec row1[] = {
-      { "1", "1", 35.33, NULL }, { "2", "2", 35.33, NULL }, { "3", "3", 35.33, NULL }, { "4", "4", 35.33, NULL }, { "5", "5", 35.33, NULL },
-      { "6", "6", 35.33, NULL }, { "7", "7", 35.33, NULL }, { "8", "8", 35.33, NULL }, { "9", "9", 35.33, NULL }, { "0", "0", 35.33, NULL },
-    };
-    static const KeySpec row2[] = {
-      { "@", "@", 35.33, NULL }, { "#", "#", 35.33, NULL }, { "$", "$", 35.33, NULL }, { "_", "_", 35.33, NULL }, { "&", "&", 35.33, NULL },
-      { "-", "-", 35.33, NULL }, { "+", "+", 35.33, NULL }, { "(", "(", 35.33, NULL }, { ")", ")", 35.33, NULL },
-    };
-    static const KeySpec row3[] = {
-      { "123", "Numbers", 52.67, "action" }, { "*", "*", 35.33, NULL }, { "\"", "\"", 35.33, NULL }, { "'", "'", 35.33, NULL },
-      { ":", ":", 35.33, NULL }, { ";", ";", 35.33, NULL }, { "!", "!", 35.33, NULL }, { "?", "?", 35.33, NULL }, { "⌫", "Backspace", 52.67, "action" },
-    };
-    static const KeySpec row4[] = {
-      { "ABC", "Main", 62.0, "action" }, { ",", ",", 44.0, NULL }, { "space", "Space", 142.0, "space" }, { ".", ".", 44.0, NULL }, { "return", "Enter", 62.0, "action" },
-    };
-    const KeySpec *rows[] = { row1, row2, row3, row4 };
-    const guint counts[] = { G_N_ELEMENTS (row1), G_N_ELEMENTS (row2), G_N_ELEMENTS (row3), G_N_ELEMENTS (row4) };
-    for (guint i = 0; i < 4; i++)
-      self->layout_width = MAX (self->layout_width, row_width (rows[i], counts[i]));
-    for (guint i = 0; i < 4; i++)
-      add_logical_row (self, GTK_FIXED (fixed), rows[i], counts[i], i * (key_height + row_gap), row_width (rows[i], counts[i]), 0.0, key_height);
-  } else if (self->page == LAYOUT_NUMBERS) {
-    static const KeySpec row1[] = {
-      { "1", "1", 110.0, NULL }, { "2", "2", 110.0, NULL }, { "3", "3", 110.0, NULL },
-    };
-    static const KeySpec row2[] = {
-      { "4", "4", 110.0, NULL }, { "5", "5", 110.0, NULL }, { "6", "6", 110.0, NULL },
-    };
-    static const KeySpec row3[] = {
-      { "7", "7", 110.0, NULL }, { "8", "8", 110.0, NULL }, { "9", "9", 110.0, NULL },
-    };
-    static const KeySpec row4[] = {
-      { "ABC", "Main", 62.0, "action" }, { "0", "0", 110.0, NULL }, { "⌫", "Backspace", 62.0, "action" }, { "return", "Enter", 110.0, "action" },
-    };
-    const KeySpec *rows[] = { row1, row2, row3, row4 };
-    const guint counts[] = { G_N_ELEMENTS (row1), G_N_ELEMENTS (row2), G_N_ELEMENTS (row3), G_N_ELEMENTS (row4) };
-    for (guint i = 0; i < 4; i++)
-      self->layout_width = MAX (self->layout_width, row_width (rows[i], counts[i]));
-    for (guint i = 0; i < 4; i++)
-      add_logical_row (self, GTK_FIXED (fixed), rows[i], counts[i], i * (key_height + row_gap), row_width (rows[i], counts[i]), 0.0, key_height);
-  } else {
-    static const KeySpec row1[] = {
-      { "q", "q", 35.33, NULL }, { "w", "w", 35.33, NULL }, { "e", "e", 35.33, NULL }, { "r", "r", 35.33, NULL }, { "t", "t", 35.33, NULL },
-      { "y", "y", 35.33, NULL }, { "u", "u", 35.33, NULL }, { "i", "i", 35.33, NULL }, { "o", "o", 35.33, NULL }, { "p", "p", 35.33, NULL },
-    };
-    static const KeySpec row2[] = {
-      { "a", "a", 35.33, NULL }, { "s", "s", 35.33, NULL }, { "d", "d", 35.33, NULL }, { "f", "f", 35.33, NULL }, { "g", "g", 35.33, NULL },
-      { "h", "h", 35.33, NULL }, { "j", "j", 35.33, NULL }, { "k", "k", 35.33, NULL }, { "l", "l", 35.33, NULL },
-    };
-    static const KeySpec row3[] = {
-      { "⇧", "Shift", 52.67, "action" }, { "z", "z", 35.33, NULL }, { "x", "x", 35.33, NULL }, { "c", "c", 35.33, NULL }, { "v", "v", 35.33, NULL },
-      { "b", "b", 35.33, NULL }, { "n", "n", 35.33, NULL }, { "m", "m", 35.33, NULL }, { "⌫", "Backspace", 52.67, "action" },
-    };
-    static const KeySpec row4[] = {
-      { "?123", "Symbols", 62.0, "action" }, { "拼", "Mode", 44.0, "mode" },
-      { "space", "Space", 142.0, "space" }, { ".", ".", 44.0, NULL }, { "return", "Enter", 62.0, "action" },
-    };
-    const KeySpec *rows[] = { row1, row2, row3, row4 };
-    const guint counts[] = { G_N_ELEMENTS (row1), G_N_ELEMENTS (row2), G_N_ELEMENTS (row3), G_N_ELEMENTS (row4) };
-    for (guint i = 0; i < 4; i++)
-      self->layout_width = MAX (self->layout_width, row_width (rows[i], counts[i]));
-    for (guint i = 0; i < 4; i++)
-      add_logical_row (self, GTK_FIXED (fixed), rows[i], counts[i], i * (key_height + row_gap), row_width (rows[i], counts[i]), 0.0, key_height);
-  }
+  if (self->page == LAYOUT_SYMBOLS)
+    page = MYNA_LAYOUT_PAGE_SYMBOLS;
+  else if (self->page == LAYOUT_NUMBERS)
+    page = MYNA_LAYOUT_PAGE_NUMBERS;
+
+  snapshot = myna_layout_page_new (page);
+  if (!build_keyboard_from_snapshot (self, GTK_FIXED (fixed), snapshot))
+    g_warning ("Failed to build keyboard from Rust layout snapshot");
+  myna_layout_snapshot_free (snapshot);
 
   self->keyboard_fixed = fixed;
 }
@@ -541,8 +501,11 @@ build_keyboard (MynaApp *self)
 static void
 rebuild_keyboard (MynaApp *self)
 {
-  if (self->keyboard_fixed)
-    gtk_widget_destroy (self->keyboard_fixed);
+  if (self->keyboard_fixed) {
+    GtkWidget *old_keyboard = self->keyboard_fixed;
+    self->keyboard_fixed = NULL;
+    gtk_container_remove (GTK_CONTAINER (self->keyboard_area), old_keyboard);
+  }
 
   build_keyboard (self);
   g_signal_connect (self->keyboard_fixed, "size-allocate", G_CALLBACK (on_keyboard_size_allocate), self);
@@ -550,6 +513,8 @@ rebuild_keyboard (MynaApp *self)
   gtk_widget_queue_resize (self->keyboard_fixed);
   gtk_widget_show_all (self->keyboard_fixed);
   gtk_stack_set_visible_child_name (GTK_STACK (self->keyboard_area), self->candidate_panel_open ? "candidates" : "keyboard");
+  relayout_keyboard_idle (self);
+  g_idle_add (relayout_keyboard_idle, self);
 }
 
 static void
@@ -623,6 +588,8 @@ populate_candidate_panel (MynaApp *self, MynaView *view)
     int column = (int) (i % columns);
     int row = (int) (i / columns);
 
+    gtk_widget_set_can_focus (button, FALSE);
+    gtk_widget_set_focus_on_click (button, FALSE);
     gtk_widget_set_hexpand (button, TRUE);
     gtk_widget_set_vexpand (button, FALSE);
     gtk_widget_set_halign (button, GTK_ALIGN_FILL);
@@ -667,6 +634,8 @@ refresh_view (MynaApp *self)
     GtkWidget *button = gtk_button_new_with_label (view->candidates[i]);
     int column = (int) i;
 
+    gtk_widget_set_can_focus (button, FALSE);
+    gtk_widget_set_focus_on_click (button, FALSE);
     gtk_widget_set_hexpand (button, FALSE);
     gtk_widget_set_halign (button, GTK_ALIGN_START);
     gtk_widget_set_size_request (button, -1, 34);
@@ -924,6 +893,8 @@ activate (GtkApplication *app, gpointer user_data)
   gtk_box_pack_start (GTK_BOX (candidate_row), self->candidate_scroller, TRUE, TRUE, 0);
 
   self->candidate_toggle_button = gtk_button_new_with_label ("⌄");
+  gtk_widget_set_can_focus (self->candidate_toggle_button, FALSE);
+  gtk_widget_set_focus_on_click (self->candidate_toggle_button, FALSE);
   gtk_style_context_add_class (gtk_widget_get_style_context (self->candidate_toggle_button), "candidate");
   gtk_style_context_add_class (gtk_widget_get_style_context (self->candidate_toggle_button), "candidate-toggle");
   g_signal_connect (self->candidate_toggle_button, "clicked", G_CALLBACK (on_candidates_toggle_clicked), self);

@@ -2,6 +2,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
+mod layout;
+
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MynaMode {
@@ -21,6 +23,54 @@ pub struct MynaView {
 pub struct MynaAction {
     pub commit: *mut c_char,
     pub request_refresh: bool,
+}
+
+#[repr(C)]
+pub struct MynaLayoutSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[repr(C)]
+pub struct MynaLayoutTransform {
+    pub origin_x: f64,
+    pub origin_y: f64,
+    pub scale_x: f64,
+    pub scale_y: f64,
+}
+
+#[repr(C)]
+pub struct MynaLayoutKey {
+    pub label: *const c_char,
+    pub action: *const c_char,
+    pub class_name: *const c_char,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MynaLayoutPage {
+    Main = 0,
+    Symbols = 1,
+    Numbers = 2,
+}
+
+struct MynaLayoutKeyRecord {
+    label: CString,
+    action: CString,
+    class_name: CString,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+pub struct MynaLayoutSnapshot {
+    layout: layout::Layout,
+    keys: Vec<MynaLayoutKeyRecord>,
 }
 
 unsafe extern "C" {
@@ -55,6 +105,10 @@ fn cstring(text: &str) -> *mut c_char {
     CString::new(text).unwrap_or_default().into_raw()
 }
 
+fn borrowed_cstring(text: &str) -> CString {
+    CString::new(text).unwrap_or_default()
+}
+
 unsafe fn take_optional_string(ptr: *mut c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
@@ -70,6 +124,37 @@ fn action(commit: Option<String>, request_refresh: bool) -> *mut MynaAction {
         commit: commit.map_or(ptr::null_mut(), |text| cstring(&text)),
         request_refresh,
     }))
+}
+
+fn layout_snapshot(view: layout::View) -> MynaLayoutSnapshot {
+    let layout = layout::Layout {
+        views: vec![view],
+        margins: layout::Margins {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        },
+    };
+
+    let mut keys = Vec::new();
+    for view in &layout.views {
+        for (row_origin, row) in &view.rows {
+            for placed in &row.keys {
+                keys.push(MynaLayoutKeyRecord {
+                    label: borrowed_cstring(placed.key.label),
+                    action: borrowed_cstring(placed.key.action),
+                    class_name: borrowed_cstring(placed.key.class),
+                    x: row_origin.x + placed.origin.x,
+                    y: row_origin.y + placed.origin.y,
+                    width: placed.key.width,
+                    height: placed.key.height,
+                });
+            }
+        }
+    }
+
+    MynaLayoutSnapshot { layout, keys }
 }
 
 #[no_mangle]
@@ -300,5 +385,107 @@ pub unsafe extern "C" fn myna_action_free(action: *mut MynaAction) {
 pub unsafe extern "C" fn myna_string_free(value: *mut c_char) {
     if !value.is_null() {
         drop(CString::from_raw(value));
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn myna_layout_us_base_new() -> *mut MynaLayoutSnapshot {
+    Box::into_raw(Box::new(layout_snapshot(layout::us_base_view())))
+}
+
+#[no_mangle]
+pub extern "C" fn myna_layout_page_new(page: MynaLayoutPage) -> *mut MynaLayoutSnapshot {
+    let view = match page {
+        MynaLayoutPage::Main => layout::us_base_view(),
+        MynaLayoutPage::Symbols => layout::symbols_view(),
+        MynaLayoutPage::Numbers => layout::numbers_view(),
+    };
+
+    Box::into_raw(Box::new(layout_snapshot(view)))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_layout_snapshot_free(snapshot: *mut MynaLayoutSnapshot) {
+    if !snapshot.is_null() {
+        drop(Box::from_raw(snapshot));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_layout_key_count(snapshot: *const MynaLayoutSnapshot) -> usize {
+    snapshot.as_ref().map(|snapshot| snapshot.keys.len()).unwrap_or(0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_layout_size(snapshot: *const MynaLayoutSnapshot) -> MynaLayoutSize {
+    let Some(snapshot) = snapshot.as_ref() else {
+        return MynaLayoutSize {
+            width: 0.0,
+            height: 0.0,
+        };
+    };
+    let size = snapshot.layout.size();
+
+    MynaLayoutSize {
+        width: size.width,
+        height: size.height,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_layout_transform(
+    snapshot: *const MynaLayoutSnapshot,
+    available_width: f64,
+    available_height: f64,
+) -> MynaLayoutTransform {
+    let Some(snapshot) = snapshot.as_ref() else {
+        return MynaLayoutTransform {
+            origin_x: 0.0,
+            origin_y: 0.0,
+            scale_x: 0.0,
+            scale_y: 0.0,
+        };
+    };
+    let transform = snapshot.layout.transformation(layout::Size {
+        width: available_width,
+        height: available_height,
+    });
+
+    MynaLayoutTransform {
+        origin_x: transform.origin_x,
+        origin_y: transform.origin_y,
+        scale_x: transform.scale_x,
+        scale_y: transform.scale_y,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_layout_key_at(
+    snapshot: *const MynaLayoutSnapshot,
+    index: usize,
+) -> MynaLayoutKey {
+    let Some(record) = snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.keys.get(index))
+    else {
+        return MynaLayoutKey {
+            label: ptr::null(),
+            action: ptr::null(),
+            class_name: ptr::null(),
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
+    };
+
+    MynaLayoutKey {
+        label: record.label.as_ptr(),
+        action: record.action.as_ptr(),
+        class_name: record.class_name.as_ptr(),
+        x: record.x,
+        y: record.y,
+        width: record.width,
+        height: record.height,
     }
 }

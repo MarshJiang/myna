@@ -12,8 +12,11 @@ static void
 input_activate (void *data, struct zwp_input_method_v2 *input_method)
 {
   MynaWayland *self = data;
-  if (self->input_method == input_method)
-    self->input_active = true;
+  if (self->input_method == input_method) {
+    self->pending_input_active = true;
+    self->has_surrounding_text = false;
+    g_debug ("input-method-v2 activate pending");
+  }
 }
 
 static void
@@ -21,8 +24,9 @@ input_deactivate (void *data, struct zwp_input_method_v2 *input_method)
 {
   MynaWayland *self = data;
   if (self->input_method == input_method) {
-    self->input_active = false;
+    self->pending_input_active = false;
     self->has_surrounding_text = false;
+    g_debug ("input-method-v2 deactivate pending");
   }
 }
 
@@ -43,6 +47,7 @@ input_surrounding_text (void *data,
   self->surrounding_text = g_strdup (text ? text : "");
   self->surrounding_cursor = cursor;
   self->has_surrounding_text = true;
+  g_debug ("input-method-v2 surrounding_text cursor=%u bytes=%zu", cursor, strlen (self->surrounding_text));
 }
 
 static void
@@ -71,8 +76,13 @@ static void
 input_done (void *data, struct zwp_input_method_v2 *input_method)
 {
   MynaWayland *self = data;
-  if (self->input_method == input_method)
+  if (self->input_method == input_method) {
+    self->input_active = self->pending_input_active;
     self->serial++;
+    g_debug ("input-method-v2 done serial=%u active=%s",
+             self->serial,
+             self->input_active ? "true" : "false");
+  }
 }
 
 static void
@@ -80,8 +90,11 @@ input_unavailable (void *data, struct zwp_input_method_v2 *input_method)
 {
   MynaWayland *self = data;
   if (self->input_method == input_method) {
+    zwp_input_method_v2_destroy (self->input_method);
     self->input_method = NULL;
+    self->pending_input_active = false;
     self->input_active = false;
+    g_warning ("input-method-v2 unavailable; another input method is probably already associated with this seat");
   }
 }
 
@@ -212,12 +225,7 @@ myna_wayland_init (MynaWayland *self)
   if (!self->input_method_manager)
     g_warning ("input-method-v2 is unavailable; text submission will fail");
 
-  if (self->input_method_manager && self->seat) {
-    self->input_method = zwp_input_method_manager_v2_get_input_method (
-        self->input_method_manager,
-        self->seat);
-    zwp_input_method_v2_add_listener (self->input_method, &input_listener, self);
-  }
+  myna_wayland_ensure_input_method (self);
 
   if (self->virtual_keyboard_manager && self->seat) {
     self->virtual_keyboard = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard (
@@ -235,6 +243,26 @@ myna_wayland_init (MynaWayland *self)
              self->virtual_keyboard ? "yes" : "no");
 
   return self->layer_shell != NULL;
+}
+
+bool
+myna_wayland_ensure_input_method (MynaWayland *self)
+{
+  if (self->input_method)
+    return true;
+  if (!self->input_method_manager || !self->seat)
+    return false;
+
+  self->pending_input_active = false;
+  self->input_active = false;
+  self->serial = 0;
+  self->input_method = zwp_input_method_manager_v2_get_input_method (
+      self->input_method_manager,
+      self->seat);
+  zwp_input_method_v2_add_listener (self->input_method, &input_listener, self);
+  wl_display_flush (self->display);
+  g_debug ("Requested input-method-v2 object");
+  return true;
 }
 
 void
@@ -262,9 +290,17 @@ myna_wayland_destroy (MynaWayland *self)
 bool
 myna_wayland_commit_string (MynaWayland *self, const char *text)
 {
-  if (!self->input_method || !self->input_active || !text)
+  if (!self->input_method || !self->input_active || !text) {
+    g_debug ("input-method-v2 commit rejected has_im=%s active=%s pending=%s serial=%u text=%s",
+             self->input_method ? "true" : "false",
+             self->input_active ? "true" : "false",
+             self->pending_input_active ? "true" : "false",
+             self->serial,
+             text ? text : "(null)");
     return false;
+  }
 
+  g_debug ("input-method-v2 commit_string serial=%u text=%s", self->serial, text);
   zwp_input_method_v2_commit_string (self->input_method, text);
   zwp_input_method_v2_commit (self->input_method, self->serial);
   wl_display_flush (self->display);
@@ -276,8 +312,14 @@ myna_wayland_delete_before (MynaWayland *self, uint32_t bytes)
 {
   uint32_t delete_bytes = bytes;
 
-  if (!self->input_method || !self->input_active)
+  if (!self->input_method || !self->input_active) {
+    g_debug ("input-method-v2 delete rejected has_im=%s active=%s pending=%s serial=%u",
+             self->input_method ? "true" : "false",
+             self->input_active ? "true" : "false",
+             self->pending_input_active ? "true" : "false",
+             self->serial);
     return false;
+  }
   if (!self->has_surrounding_text || !self->surrounding_text || self->surrounding_cursor == 0)
     return false;
 

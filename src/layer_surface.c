@@ -143,6 +143,7 @@ myna_layer_surface_init (MynaLayerSurface *self)
   gtk_window_set_skip_taskbar_hint (GTK_WINDOW (self), TRUE);
   gtk_window_set_skip_pager_hint (GTK_WINDOW (self), TRUE);
   gtk_widget_set_can_focus (GTK_WIDGET (self), FALSE);
+  g_object_set (G_OBJECT (self), "accept-focus", FALSE, NULL);
 }
 
 GtkWidget *
