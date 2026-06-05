@@ -376,6 +376,19 @@ display_label_for_action (const char *label, const char *action_label)
   return label;
 }
 
+static const char *
+icon_resource_for_action (const char *action_label)
+{
+  if (g_strcmp0 (action_label, "Backspace") == 0)
+    return "/mobi/phosh/MynaOsk/icons/key-backspace.svg";
+  if (g_strcmp0 (action_label, "Enter") == 0)
+    return "/mobi/phosh/MynaOsk/icons/key-enter.svg";
+  if (g_strcmp0 (action_label, "Shift") == 0)
+    return "/mobi/phosh/MynaOsk/icons/key-shift.svg";
+
+  return NULL;
+}
+
 static void
 add_action_style_class (GtkStyleContext *context, const char *action_label)
 {
@@ -397,8 +410,16 @@ add_action_style_class (GtkStyleContext *context, const char *action_label)
 static GtkWidget *
 make_button (const char *label, const char *action_label, const char *style_class)
 {
-  GtkWidget *button = gtk_button_new_with_label (display_label_for_action (label, action_label));
+  const char *icon_resource = icon_resource_for_action (action_label);
+  GtkWidget *button = icon_resource ? gtk_button_new () : gtk_button_new_with_label (display_label_for_action (label, action_label));
   GtkStyleContext *context = gtk_widget_get_style_context (button);
+
+  if (icon_resource) {
+    GtkWidget *image = gtk_image_new_from_resource (icon_resource);
+    gtk_image_set_pixel_size (GTK_IMAGE (image), 22);
+    gtk_button_set_image (GTK_BUTTON (button), image);
+    gtk_button_set_always_show_image (GTK_BUTTON (button), TRUE);
+  }
 
   gtk_widget_set_hexpand (button, TRUE);
   gtk_widget_set_vexpand (button, TRUE);
@@ -1057,8 +1078,8 @@ install_css (void)
     ".key:active { background: #68656d; }"
     ".action { background: #2f2d34; color: #f5f5f6; font-size: 15px; font-weight: 600; }"
     ".action:active { background: #504d57; }"
-    ".active { background: #f2f2f4; color: #26242b; }"
-    ".active:active { background: #ffffff; color: #1f2937; }"
+    ".active { background: #6d6878; color: #ffffff; }"
+    ".active:active { background: #7c7688; color: #ffffff; }"
     ".return-key { background: #1c71d8; color: #ffffff; font-size: 14px; font-weight: 700; }"
     ".return-key:active { background: #3584e4; }"
     ".switch-key { font-size: 14px; letter-spacing: 0; }"

@@ -61,6 +61,12 @@ rust_lib = static_library(
   rust_abi: 'c',
 )
 
+myna_resources = gnome.compile_resources(
+  'myna-resources',
+  'data/myna.gresource.xml',
+  source_dir: 'data',
+)
+
 executable(
   'myna-osk',
   [
@@ -68,6 +74,7 @@ executable(
     'src/bridge.c',
     'src/layer_surface.c',
     'src/rime_shim.c',
+    myna_resources,
     wl_generated,
   ],
   include_directories: include_directories('src'),
