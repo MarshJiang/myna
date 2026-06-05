@@ -66,4 +66,14 @@ On systems without `systemd.pc`, Meson installs the user unit to
 meson setup build --reconfigure -Dsystemd_user_unit_dir=/usr/lib/systemd/user
 ```
 
+Run a full Rime maintenance/deployment pass after changing schemas or
+dictionaries:
+
+```sh
+myna-osk --rime-deploy
+```
+
+Rime may report missing schemas if the user's schema list references data files
+that are not installed on the device.
+
 This repository was prepared without local device compilation or runtime tests.

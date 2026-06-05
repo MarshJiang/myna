@@ -4,6 +4,7 @@
 #include "bridge.h"
 #include "layer_surface.h"
 #include "myna_rs.h"
+#include "rime_shim.h"
 
 #define APP_ID "mobi.phosh.MynaOsk"
 #define OSK_BUS_NAME "sm.puri.OSK0"
@@ -35,6 +36,17 @@ long_press_context_free (gpointer data, GClosure *closure)
 {
   (void) closure;
   g_free (data);
+}
+
+static gboolean
+should_deploy_rime (int argc, char **argv)
+{
+  for (int i = 1; i < argc; i++) {
+    if (g_strcmp0 (argv[i], "--rime-deploy") == 0)
+      return TRUE;
+  }
+
+  return FALSE;
 }
 
 struct _MynaApp {
@@ -1139,6 +1151,15 @@ main (int argc, char **argv)
   GError *error = NULL;
   int status;
   guint bus_id;
+
+  if (should_deploy_rime (argc, argv)) {
+    if (!myna_rime_deploy_full ()) {
+      g_warning ("Rime full deployment failed");
+      return 1;
+    }
+    g_message ("Rime full deployment finished; check Rime logs for schema warnings");
+    return 0;
+  }
 
   if (!gtk_init_check (&argc, &argv)) {
     g_warning ("No display available; exiting without registering OSK");

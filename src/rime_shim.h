@@ -7,6 +7,7 @@ typedef struct MynaRime MynaRime;
 
 MynaRime *myna_rime_create              (void);
 void      myna_rime_destroy             (MynaRime *self);
+bool      myna_rime_deploy_full         (void);
 bool      myna_rime_process_key         (MynaRime *self, int key);
 bool      myna_rime_select_candidate    (MynaRime *self, size_t index);
 void      myna_rime_clear               (MynaRime *self);

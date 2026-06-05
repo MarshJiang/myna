@@ -13,6 +13,43 @@ struct MynaRime {
 static gboolean rime_ready;
 
 static void
+setup_traits (RimeTraits *traits)
+{
+  traits->shared_data_dir = "/usr/share/rime-data";
+  traits->user_data_dir = g_build_filename (g_get_user_config_dir (), "myna-rime", NULL);
+  traits->distribution_name = "Myna";
+  traits->distribution_code_name = "myna";
+  traits->distribution_version = "0.1.0";
+}
+
+static void
+clear_traits (RimeTraits *traits)
+{
+  g_free ((char *) traits->user_data_dir);
+  traits->user_data_dir = NULL;
+}
+
+static void
+ensure_rime_ready (RimeApi *api, bool full_check)
+{
+  if (!rime_ready) {
+    RIME_STRUCT (RimeTraits, traits);
+    setup_traits (&traits);
+
+    api->setup (&traits);
+    api->initialize (&traits);
+    api->start_maintenance (full_check);
+    api->join_maintenance_thread ();
+
+    clear_traits (&traits);
+    rime_ready = TRUE;
+  } else if (full_check) {
+    api->start_maintenance (true);
+    api->join_maintenance_thread ();
+  }
+}
+
+static void
 select_preferred_schema (MynaRime *self)
 {
   static const char *schemas[] = {
@@ -40,28 +77,21 @@ myna_rime_create (void)
 {
   RimeApi *api = rime_get_api ();
 
-  if (!rime_ready) {
-    RIME_STRUCT (RimeTraits, traits);
-    traits.shared_data_dir = "/usr/share/rime-data";
-    traits.user_data_dir = g_build_filename (g_get_user_config_dir (), "myna-rime", NULL);
-    traits.distribution_name = "Myna";
-    traits.distribution_code_name = "myna";
-    traits.distribution_version = "0.1.0";
-
-    api->setup (&traits);
-    api->initialize (&traits);
-    api->start_maintenance (false);
-    api->join_maintenance_thread ();
-
-    g_free ((char *) traits.user_data_dir);
-    rime_ready = TRUE;
-  }
+  ensure_rime_ready (api, false);
 
   MynaRime *self = g_new0 (MynaRime, 1);
   self->api = api;
   self->session = api->create_session ();
   select_preferred_schema (self);
   return self;
+}
+
+bool
+myna_rime_deploy_full (void)
+{
+  RimeApi *api = rime_get_api ();
+  ensure_rime_ready (api, true);
+  return true;
 }
 
 void
