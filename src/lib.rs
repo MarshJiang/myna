@@ -316,6 +316,19 @@ pub unsafe extern "C" fn myna_keyboard_select_candidate(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn myna_keyboard_clear_composition(kbd: *mut Keyboard) -> *mut MynaAction {
+    let Some(kbd) = kbd.as_mut() else {
+        return action(None, false);
+    };
+
+    if !kbd.rime.is_null() {
+        myna_rime_clear(kbd.rime);
+    }
+
+    action(None, true)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn myna_keyboard_view(kbd: *mut Keyboard) -> *mut MynaView {
     let Some(kbd) = kbd.as_ref() else {
         return ptr::null_mut();

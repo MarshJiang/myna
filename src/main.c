@@ -710,10 +710,13 @@ set_visible (MynaApp *self, gboolean visible)
 {
   self->visible = visible;
 
-  if (visible)
+  if (visible) {
     gtk_widget_show_all (self->window);
-  else
+  } else {
+    self->candidate_panel_open = FALSE;
+    handle_action (self, myna_keyboard_clear_composition (self->keyboard));
     gtk_widget_hide (self->window);
+  }
 
   if (visible && self->keyboard_fixed) {
     gtk_widget_queue_resize (self->keyboard_area);

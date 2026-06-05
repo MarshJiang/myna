@@ -58,6 +58,7 @@ MynaAction *myna_keyboard_set_mode         (Keyboard *kbd, MynaMode mode);
 MynaAction *myna_keyboard_toggle_mode      (Keyboard *kbd);
 MynaAction *myna_keyboard_press_label      (Keyboard *kbd, const char *label);
 MynaAction *myna_keyboard_select_candidate (Keyboard *kbd, size_t index);
+MynaAction *myna_keyboard_clear_composition(Keyboard *kbd);
 MynaView   *myna_keyboard_view             (Keyboard *kbd);
 void        myna_view_free                 (MynaView *view);
 void        myna_action_free               (MynaAction *action);
