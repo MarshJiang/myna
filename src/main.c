@@ -376,6 +376,24 @@ display_label_for_action (const char *label, const char *action_label)
   return label;
 }
 
+static void
+add_action_style_class (GtkStyleContext *context, const char *action_label)
+{
+  if (g_strcmp0 (action_label, "Backspace") == 0)
+    gtk_style_context_add_class (context, "backspace");
+  else if (g_strcmp0 (action_label, "Enter") == 0)
+    gtk_style_context_add_class (context, "return-key");
+  else if (g_strcmp0 (action_label, "Shift") == 0)
+    gtk_style_context_add_class (context, "shift-key");
+  else if (g_strcmp0 (action_label, "Mode") == 0)
+    gtk_style_context_add_class (context, "mode-key");
+  else if (g_strcmp0 (action_label, "Symbols") == 0 ||
+           g_strcmp0 (action_label, "MoreSymbols") == 0 ||
+           g_strcmp0 (action_label, "Main") == 0 ||
+           g_strcmp0 (action_label, "Numbers") == 0)
+    gtk_style_context_add_class (context, "switch-key");
+}
+
 static GtkWidget *
 make_button (const char *label, const char *action_label, const char *style_class)
 {
@@ -396,6 +414,7 @@ make_button (const char *label, const char *action_label, const char *style_clas
     }
     g_strfreev (classes);
   }
+  add_action_style_class (context, action_label);
   g_object_set_data_full (G_OBJECT (button), "myna-label", g_strdup (action_label), g_free);
 
   return button;
@@ -1021,7 +1040,7 @@ static void
 install_css (void)
 {
   static const char css[] =
-    "window { background: #303136; }"
+    "window { background: #18181b; }"
     ".root { padding: 7px 8px 8px 8px; }"
     ".candidate-strip { min-height: 38px; padding: 0 1px 2px 1px; }"
     ".preedit { color: #f3f4f6; font-size: 15px; padding: 0 8px; min-width: 52px; font-weight: 600; }"
@@ -1034,13 +1053,20 @@ install_css (void)
     ".candidate-cell:active { background: #dfe3e8; }"
     ".candidate-small { font-size: 15px; }"
     ".candidate-tiny { font-size: 13px; }"
-    ".key { border-radius: 4px; margin: 2px; padding: 0; font-size: 18px; min-height: 0; background: #f4f5f7; color: #202124; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.38); }"
-    ".key:active { background: #dfe3e8; }"
-    ".action { background: #747982; color: #ffffff; font-size: 15px; }"
-    ".action:active { background: #8a9099; }"
+    ".key { border-radius: 4px; margin: 2px; padding: 0; font-family: Cantarell, 'Noto Sans CJK SC', 'Noto Sans Symbols 2', 'Noto Sans Symbols', sans-serif; font-size: 18px; font-weight: 500; min-height: 0; background: #4b4a50; color: #f1f1f4; border: 0; box-shadow: 0 1px 0 rgba(0,0,0,0.55); text-shadow: none; }"
+    ".key:active { background: #68656d; }"
+    ".action { background: #2f2d34; color: #f5f5f6; font-size: 15px; font-weight: 600; }"
+    ".action:active { background: #504d57; }"
+    ".active { background: #f2f2f4; color: #26242b; }"
+    ".active:active { background: #ffffff; color: #1f2937; }"
+    ".return-key { background: #1c71d8; color: #ffffff; font-size: 14px; font-weight: 700; }"
+    ".return-key:active { background: #3584e4; }"
+    ".switch-key { font-size: 14px; letter-spacing: 0; }"
+    ".backspace, .shift-key { font-size: 20px; }"
     ".alternate { border-radius: 4px; min-width: 40px; min-height: 36px; font-size: 18px; }"
-    ".space { font-size: 14px; color: #5f6368; }"
-    ".mode { font-weight: 700; color: #1f2937; }";
+    ".space { font-size: 14px; color: #e8e8ec; }"
+    ".mode { font-weight: 700; color: #f8fafc; }"
+    ".mode-key { background: #393741; }";
   GtkCssProvider *provider = gtk_css_provider_new ();
 
   gtk_css_provider_load_from_data (provider, css, -1, NULL);
