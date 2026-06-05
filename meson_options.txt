@@ -1,0 +1,6 @@
+option(
+  'systemd_user_unit_dir',
+  type: 'string',
+  value: '',
+  description: 'Directory for systemd user units; autodetect from systemd.pc or use /usr/lib/systemd/user when empty',
+)

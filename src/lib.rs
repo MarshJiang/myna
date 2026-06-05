@@ -126,6 +126,13 @@ fn action(commit: Option<String>, request_refresh: bool) -> *mut MynaAction {
     }))
 }
 
+unsafe fn ensure_rime(kbd: &mut Keyboard) -> *mut c_void {
+    if kbd.rime.is_null() {
+        kbd.rime = myna_rime_create();
+    }
+    kbd.rime
+}
+
 fn layout_snapshot(view: layout::View) -> MynaLayoutSnapshot {
     let layout = layout::Layout {
         views: vec![view],
@@ -162,7 +169,7 @@ pub extern "C" fn myna_keyboard_new() -> *mut Keyboard {
     Box::into_raw(Box::new(Keyboard {
         mode: MynaMode::Pinyin,
         shifted: false,
-        rime: unsafe { myna_rime_create() },
+        rime: ptr::null_mut(),
     }))
 }
 
@@ -246,9 +253,10 @@ pub unsafe extern "C" fn myna_keyboard_press_label(
     match kbd.mode {
         MynaMode::Latin => action(Some(ch.to_string()), true),
         MynaMode::Pinyin => {
-            if ch.is_ascii_alphabetic() && !kbd.rime.is_null() {
-                myna_rime_process_key(kbd.rime, ch.to_ascii_lowercase() as c_int);
-                let commit = take_optional_string(myna_rime_take_commit(kbd.rime));
+            if ch.is_ascii_alphabetic() {
+                let rime = ensure_rime(kbd);
+                myna_rime_process_key(rime, ch.to_ascii_lowercase() as c_int);
+                let commit = take_optional_string(myna_rime_take_commit(rime));
                 action(commit, true)
             } else {
                 action(Some(ch.to_string()), true)

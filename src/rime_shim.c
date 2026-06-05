@@ -50,7 +50,7 @@ myna_rime_create (void)
 
     api->setup (&traits);
     api->initialize (&traits);
-    api->start_maintenance (true);
+    api->start_maintenance (false);
     api->join_maintenance_thread ();
 
     g_free ((char *) traits.user_data_dir);

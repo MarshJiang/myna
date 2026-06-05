@@ -10,7 +10,8 @@ The project is intentionally split in two layers:
 
 ## Features in this initial implementation
 
-- `sm.puri.OSK0.desktop` entry for Phosh OSK discovery.
+- `mobi.phosh.MynaOsk.desktop` entry for Phosh OSK discovery through the
+  `Phosh-OSK` alternatives link.
 - `mobi.phosh.OSK.service` user unit for Phosh 0.50 and newer.
 - `sm.puri.OSK0` D-Bus interface with `SetVisible`, `GetVisible`, and
   `Visible`.
@@ -26,7 +27,7 @@ The project is intentionally split in two layers:
 The first layout keeps the same key geometry for English and Pinyin. The mode
 button switches between direct Latin commits and Rime-backed Pinyin composition.
 The panel is anchored to the bottom via `wlr-layer-shell`, claims an exclusive
-zone, and sizes itself from the primary monitor height so small Droidian screens
+zone, and sizes itself from the logical monitor width so small Droidian screens
 keep a usable candidate strip and four key rows.
 
 ## Build on Droidian
@@ -43,6 +44,26 @@ Then build on the Droidian device:
 ```sh
 meson setup build
 ninja -C build
+```
+
+Install and reload the Phosh OSK service metadata:
+
+```sh
+sudo ninja -C build install
+sudo update-alternatives --install \
+  /usr/share/applications/sm.puri.OSK0.desktop \
+  Phosh-OSK \
+  /usr/share/applications/mobi.phosh.MynaOsk.desktop \
+  60
+systemctl --user daemon-reload
+systemctl --user restart mobi.phosh.OSK.service
+```
+
+On systems without `systemd.pc`, Meson installs the user unit to
+`/usr/lib/systemd/user` by default. Override it when needed:
+
+```sh
+meson setup build --reconfigure -Dsystemd_user_unit_dir=/usr/lib/systemd/user
 ```
 
 This repository was prepared without local device compilation or runtime tests.

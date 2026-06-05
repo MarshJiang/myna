@@ -9,6 +9,13 @@
 #include <xkbcommon/xkbcommon.h>
 
 static void
+notify_visibility (MynaWayland *self, bool visible)
+{
+  if (self->visibility_callback)
+    self->visibility_callback (self->visibility_user_data, visible);
+}
+
+static void
 input_activate (void *data, struct zwp_input_method_v2 *input_method)
 {
   MynaWayland *self = data;
@@ -77,11 +84,14 @@ input_done (void *data, struct zwp_input_method_v2 *input_method)
 {
   MynaWayland *self = data;
   if (self->input_method == input_method) {
+    bool was_active = self->input_active;
     self->input_active = self->pending_input_active;
     self->serial++;
     g_debug ("input-method-v2 done serial=%u active=%s",
              self->serial,
              self->input_active ? "true" : "false");
+    if (self->input_active != was_active)
+      notify_visibility (self, self->input_active);
   }
 }
 
@@ -205,7 +215,12 @@ out:
 bool
 myna_wayland_init (MynaWayland *self)
 {
+  MynaWaylandVisibilityCallback visibility_callback = self->visibility_callback;
+  void *visibility_user_data = self->visibility_user_data;
+
   memset (self, 0, sizeof (*self));
+  self->visibility_callback = visibility_callback;
+  self->visibility_user_data = visibility_user_data;
 
   self->display = gdk_wayland_display_get_wl_display (gdk_display_get_default ());
   if (!self->display) {
@@ -243,6 +258,15 @@ myna_wayland_init (MynaWayland *self)
              self->virtual_keyboard ? "yes" : "no");
 
   return self->layer_shell != NULL;
+}
+
+void
+myna_wayland_set_visibility_callback (MynaWayland *self,
+                                      MynaWaylandVisibilityCallback callback,
+                                      void *user_data)
+{
+  self->visibility_callback = callback;
+  self->visibility_user_data = user_data;
 }
 
 bool

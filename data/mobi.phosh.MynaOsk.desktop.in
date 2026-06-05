@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Myna OSK
+GenericName=On Screen Keyboard
+Comment=Chinese Pinyin on-screen keyboard for Phosh
+Exec=@bindir@/myna-osk
+Icon=input-keyboard-symbolic
+Terminal=false
+Type=Application
+NoDisplay=true
+Categories=GTK;Utility;
+OnlyShowIn=Phosh;
+X-Phosh-UsesFeedback=true
+X-GNOME-Autostart-Phase=Panel
+X-GNOME-Provides=inputmethod
+X-GNOME-Autostart-Notify=true
+X-GNOME-AutoRestart=true

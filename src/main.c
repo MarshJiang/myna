@@ -5,6 +5,7 @@
 #include "layer_surface.h"
 #include "myna_rs.h"
 
+#define APP_ID "mobi.phosh.MynaOsk"
 #define OSK_BUS_NAME "sm.puri.OSK0"
 #define OSK_OBJECT_PATH "/sm/puri/OSK0"
 
@@ -53,10 +54,15 @@ struct _MynaApp {
   MynaLayoutSnapshot *layout_snapshot;
   GDBusNodeInfo *introspection;
   GDBusConnection *bus;
+  GDBusProxy *session_proxy;
+  GDBusProxy *session_client_proxy;
   guint registration_id;
   gboolean visible;
   gboolean started;
   gboolean show_on_start;
+  gboolean bus_name_acquired;
+  gboolean bus_name_lost;
+  gboolean activation_pending;
   gboolean candidate_panel_open;
   gboolean candidate_available;
   LayoutPage page;
@@ -80,6 +86,14 @@ static void refresh_view (MynaApp *self);
 static void rebuild_keyboard (MynaApp *self);
 static void set_visible (MynaApp *self, gboolean visible);
 static gboolean relayout_keyboard_idle (gpointer user_data);
+static void register_gnome_session_client (MynaApp *self);
+static void unregister_gnome_session_client (MynaApp *self);
+static gboolean register_dbus_object (MynaApp *self);
+static void on_session_client_signal (GDBusProxy *proxy,
+                                      const char *sender_name,
+                                      const char *signal_name,
+                                      GVariant *parameters,
+                                      gpointer user_data);
 
 static int
 panel_height_for_screen (void)
@@ -133,6 +147,17 @@ submit_text (MynaApp *self, const char *text)
   myna_wayland_ensure_input_method (&self->wayland);
   if (!myna_wayland_commit_string (&self->wayland, text))
     g_warning ("Commit requested but input-method-v2 could not accept text: %s", text);
+}
+
+static void
+on_wayland_visibility_requested (void *user_data, bool visible)
+{
+  MynaApp *self = user_data;
+
+  if (!self->started)
+    return;
+
+  set_visible (self, visible);
 }
 
 static void
@@ -758,25 +783,25 @@ static const GDBusInterfaceVTable dbus_vtable = {
   .get_property = dbus_get_property,
 };
 
-static void register_gnome_session_client (MynaApp *self);
-
-static void
-on_bus_acquired (GDBusConnection *connection, const char *name, gpointer user_data)
+static gboolean
+register_dbus_object (MynaApp *self)
 {
-  MynaApp *self = user_data;
   GError *error = NULL;
-  (void) name;
 
-  self->bus = g_object_ref (connection);
+  if (!self->bus)
+    return FALSE;
+  if (self->registration_id)
+    return TRUE;
+
   self->introspection = g_dbus_node_info_new_for_xml (introspection_xml, &error);
   if (error) {
     g_warning ("D-Bus introspection failed: %s", error->message);
     g_clear_error (&error);
-    return;
+    return FALSE;
   }
 
   self->registration_id = g_dbus_connection_register_object (
-      connection,
+      self->bus,
       OSK_OBJECT_PATH,
       self->introspection->interfaces[0],
       &dbus_vtable,
@@ -787,11 +812,38 @@ on_bus_acquired (GDBusConnection *connection, const char *name, gpointer user_da
   if (error) {
     g_warning ("D-Bus object registration failed: %s", error->message);
     g_clear_error (&error);
-    return;
+    return FALSE;
   }
 
   g_message ("Registered %s on %s", OSK_BUS_NAME, OSK_OBJECT_PATH);
-  register_gnome_session_client (self);
+  return TRUE;
+}
+
+static void
+on_name_acquired (GDBusConnection *connection, const char *name, gpointer user_data)
+{
+  MynaApp *self = user_data;
+  (void) connection;
+  (void) name;
+
+  self->bus_name_acquired = TRUE;
+  self->bus_name_lost = FALSE;
+  if (self->activation_pending && self->app) {
+    self->activation_pending = FALSE;
+    g_application_activate (G_APPLICATION (self->app));
+  }
+}
+
+static void
+on_name_lost (GDBusConnection *connection, const char *name, gpointer user_data)
+{
+  MynaApp *self = user_data;
+  (void) connection;
+
+  g_warning ("Failed to own %s; another OSK instance is likely running", name);
+  self->bus_name_lost = TRUE;
+  if (self->app)
+    g_application_quit (G_APPLICATION (self->app));
 }
 
 static void
@@ -805,15 +857,33 @@ register_gnome_session_client (MynaApp *self)
     return;
   if (self->session_client_id)
     return;
+  if (self->session_proxy)
+    return;
 
-  reply = g_dbus_connection_call_sync (
-      self->bus,
+  g_message ("Registering gnome-session client name=%s autostart_id=%s",
+             OSK_BUS_NAME,
+             startup_id ? startup_id : "");
+
+  self->session_proxy = g_dbus_proxy_new_for_bus_sync (
+      G_BUS_TYPE_SESSION,
+      G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+      NULL,
       "org.gnome.SessionManager",
       "/org/gnome/SessionManager",
       "org.gnome.SessionManager",
+      NULL,
+      &error);
+
+  if (error) {
+    g_warning ("gnome-session proxy failed: %s", error->message);
+    g_clear_error (&error);
+    return;
+  }
+
+  reply = g_dbus_proxy_call_sync (
+      self->session_proxy,
       "RegisterClient",
       g_variant_new ("(ss)", OSK_BUS_NAME, startup_id ? startup_id : ""),
-      G_VARIANT_TYPE ("(o)"),
       G_DBUS_CALL_FLAGS_NONE,
       1000,
       NULL,
@@ -822,12 +892,99 @@ register_gnome_session_client (MynaApp *self)
   if (error) {
     g_warning ("gnome-session registration failed: %s", error->message);
     g_clear_error (&error);
+    g_clear_object (&self->session_proxy);
     return;
   }
 
   g_variant_get (reply, "(o)", &self->session_client_id);
   g_variant_unref (reply);
   g_message ("Registered gnome-session client: %s", self->session_client_id);
+
+  self->session_client_proxy = g_dbus_proxy_new_for_bus_sync (
+      G_BUS_TYPE_SESSION,
+      G_DBUS_PROXY_FLAGS_NONE,
+      NULL,
+      "org.gnome.SessionManager",
+      self->session_client_id,
+      "org.gnome.SessionManager.ClientPrivate",
+      NULL,
+      &error);
+
+  if (error) {
+    g_warning ("gnome-session client proxy failed: %s", error->message);
+    g_clear_error (&error);
+    return;
+  }
+
+  g_signal_connect (self->session_client_proxy,
+                    "g-signal",
+                    G_CALLBACK (on_session_client_signal),
+                    self);
+}
+
+static void
+send_end_session_response (MynaApp *self)
+{
+  if (!self->session_client_proxy)
+    return;
+
+  g_dbus_proxy_call (
+      self->session_client_proxy,
+      "EndSessionResponse",
+      g_variant_new ("(bs)", TRUE, ""),
+      G_DBUS_CALL_FLAGS_NONE,
+      G_MAXINT,
+      NULL,
+      NULL,
+      NULL);
+}
+
+static void
+unregister_gnome_session_client (MynaApp *self)
+{
+  GError *error = NULL;
+
+  if (self->session_proxy && self->session_client_id) {
+    g_dbus_proxy_call_sync (
+        self->session_proxy,
+        "UnregisterClient",
+        g_variant_new ("(o)", self->session_client_id),
+        G_DBUS_CALL_FLAGS_NONE,
+        G_MAXINT,
+        NULL,
+        &error);
+
+    if (error) {
+      g_warning ("gnome-session unregister failed: %s", error->message);
+      g_clear_error (&error);
+    }
+  }
+
+  g_clear_object (&self->session_client_proxy);
+  g_clear_pointer (&self->session_client_id, g_free);
+}
+
+static void
+on_session_client_signal (GDBusProxy *proxy,
+                          const char *sender_name,
+                          const char *signal_name,
+                          GVariant *parameters,
+                          gpointer user_data)
+{
+  MynaApp *self = user_data;
+  (void) proxy;
+  (void) sender_name;
+  (void) parameters;
+
+  if (g_strcmp0 (signal_name, "QueryEndSession") == 0) {
+    send_end_session_response (self);
+  } else if (g_strcmp0 (signal_name, "EndSession") == 0 ||
+             g_strcmp0 (signal_name, "Stop") == 0) {
+    send_end_session_response (self);
+    unregister_gnome_session_client (self);
+    if (self->app)
+      g_application_quit (G_APPLICATION (self->app));
+  }
 }
 
 static void
@@ -874,9 +1031,21 @@ activate (GtkApplication *app, gpointer user_data)
   int keyboard_height;
 
   self->app = app;
+  if (!self->bus_name_acquired) {
+    self->activation_pending = TRUE;
+    return;
+  }
+  register_gnome_session_client (self);
+  if (self->started) {
+    if (self->show_on_start)
+      set_visible (self, TRUE);
+    return;
+  }
+
   self->started = TRUE;
   self->keyboard = myna_keyboard_new ();
 
+  myna_wayland_set_visibility_callback (&self->wayland, on_wayland_visibility_requested, self);
   if (!myna_wayland_init (&self->wayland))
     g_warning ("Wayland setup was incomplete");
 
@@ -967,19 +1136,42 @@ main (int argc, char **argv)
 {
   MynaApp self = {0};
   GtkApplication *app;
+  GError *error = NULL;
   int status;
   guint bus_id;
 
-  app = gtk_application_new ("mobi.phosh.MynaOsk", G_APPLICATION_NON_UNIQUE | G_APPLICATION_HANDLES_COMMAND_LINE);
-  bus_id = g_bus_own_name (
-      G_BUS_TYPE_SESSION,
+  if (!gtk_init_check (&argc, &argv)) {
+    g_warning ("No display available; exiting without registering OSK");
+    return 0;
+  }
+
+  app = gtk_application_new (APP_ID, G_APPLICATION_NON_UNIQUE | G_APPLICATION_HANDLES_COMMAND_LINE);
+  self.app = app;
+  g_application_hold (G_APPLICATION (app));
+  g_message ("Starting Myna OSK app_id=%s bus_name=%s", APP_ID, OSK_BUS_NAME);
+  self.bus = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
+  if (error) {
+    g_warning ("Failed to connect to session bus: %s", error->message);
+    g_clear_error (&error);
+  }
+
+  if (self.bus)
+    register_dbus_object (&self);
+
+  bus_id = self.bus ? g_bus_own_name_on_connection (
+      self.bus,
       OSK_BUS_NAME,
-      G_BUS_NAME_OWNER_FLAGS_NONE,
-      on_bus_acquired,
-      NULL,
-      NULL,
+      G_BUS_NAME_OWNER_FLAGS_DO_NOT_QUEUE,
+      on_name_acquired,
+      on_name_lost,
       &self,
-      NULL);
+      NULL) : 0;
+
+  while (bus_id && !self.bus_name_acquired && !self.bus_name_lost)
+    g_main_context_iteration (NULL, TRUE);
+
+  if (self.bus_name_acquired)
+    register_gnome_session_client (&self);
 
   g_signal_connect (app, "activate", G_CALLBACK (activate), &self);
   g_signal_connect (app, "command-line", G_CALLBACK (command_line), &self);
@@ -987,12 +1179,15 @@ main (int argc, char **argv)
 
   if (self.registration_id && self.bus)
     g_dbus_connection_unregister_object (self.bus, self.registration_id);
+  unregister_gnome_session_client (&self);
+  g_clear_object (&self.session_proxy);
   g_clear_object (&self.bus);
   g_clear_pointer (&self.introspection, g_dbus_node_info_unref);
-  g_clear_pointer (&self.session_client_id, g_free);
   g_clear_pointer (&self.layout_snapshot, myna_layout_snapshot_free);
   g_clear_pointer (&self.placed_keys, g_ptr_array_unref);
-  g_bus_unown_name (bus_id);
+  if (bus_id)
+    g_bus_unown_name (bus_id);
+  g_application_release (G_APPLICATION (app));
   myna_keyboard_free (self.keyboard);
   myna_wayland_destroy (&self.wayland);
   g_object_unref (app);

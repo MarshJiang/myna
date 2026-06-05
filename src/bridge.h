@@ -7,6 +7,8 @@
 #include "virtual-keyboard-unstable-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
+typedef void (*MynaWaylandVisibilityCallback) (void *user_data, bool visible);
+
 typedef struct {
   struct wl_display *display;
   struct wl_registry *registry;
@@ -23,10 +25,15 @@ typedef struct {
   char *surrounding_text;
   uint32_t surrounding_cursor;
   bool has_surrounding_text;
+  MynaWaylandVisibilityCallback visibility_callback;
+  void *visibility_user_data;
 } MynaWayland;
 
 bool myna_wayland_init          (MynaWayland *self);
 void myna_wayland_destroy       (MynaWayland *self);
+void myna_wayland_set_visibility_callback (MynaWayland *self,
+                                           MynaWaylandVisibilityCallback callback,
+                                           void *user_data);
 bool myna_wayland_ensure_input_method (MynaWayland *self);
 bool myna_wayland_commit_string (MynaWayland *self, const char *text);
 bool myna_wayland_delete_before (MynaWayland *self, uint32_t bytes);

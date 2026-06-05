@@ -20,7 +20,15 @@ wayland_dep = dependency('wayland-client')
 wayland_protocols_dep = dependency('wayland-protocols', version: '>= 1.12')
 xkbcommon_dep = dependency('xkbcommon')
 rime_dep = dependency('rime')
+systemd_dep = dependency('systemd', method: 'pkg-config', required: false)
 wayland_protocols_dir = wayland_protocols_dep.get_variable(pkgconfig: 'pkgdatadir')
+systemd_user_unit_dir = get_option('systemd_user_unit_dir')
+if systemd_user_unit_dir == ''
+  systemd_user_unit_dir = systemd_dep.get_variable(
+    pkgconfig: 'systemd_user_unit_dir',
+    default_value: '/usr/lib/systemd/user',
+  )
+endif
 
 wl_scanner = find_program('wayland-scanner')
 wl_client_header = generator(
@@ -75,8 +83,12 @@ executable(
   install: true,
 )
 
-install_data(
-  'data/sm.puri.OSK0.desktop',
+desktop_conf = configuration_data()
+desktop_conf.set('bindir', get_option('prefix') / get_option('bindir'))
+configure_file(
+  input: 'data/mobi.phosh.MynaOsk.desktop.in',
+  output: 'mobi.phosh.MynaOsk.desktop',
+  configuration: desktop_conf,
   install_dir: get_option('datadir') / 'applications',
 )
 
@@ -91,5 +103,5 @@ configure_file(
   input: 'systemd/mobi.phosh.OSK.service.in',
   output: 'mobi.phosh.OSK.service',
   configuration: service_conf,
-  install_dir: get_option('libdir') / 'systemd/user',
+  install_dir: systemd_user_unit_dir,
 )
