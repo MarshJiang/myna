@@ -14,6 +14,7 @@ typedef enum {
   LAYOUT_MAIN,
   LAYOUT_SYMBOLS,
   LAYOUT_NUMBERS,
+  LAYOUT_MORE_SYMBOLS,
 } LayoutPage;
 
 typedef struct _MynaApp MynaApp;
@@ -189,8 +190,10 @@ handle_action (MynaApp *self, MynaAction *action)
 static void
 handle_key_action (MynaApp *self, const char *label)
 {
+  gboolean was_shifted = myna_keyboard_shifted (self->keyboard);
+
   handle_action (self, myna_keyboard_press_label (self->keyboard, label));
-  if (g_strcmp0 (label, "Mode") == 0) {
+  if (g_strcmp0 (label, "Mode") == 0 || was_shifted != myna_keyboard_shifted (self->keyboard)) {
     rebuild_keyboard (self);
     refresh_view (self);
   }
@@ -221,6 +224,10 @@ on_key_clicked (GtkButton *button, gpointer user_data)
   }
   if (g_strcmp0 (label, "Numbers") == 0) {
     set_page (self, LAYOUT_NUMBERS);
+    return;
+  }
+  if (g_strcmp0 (label, "MoreSymbols") == 0) {
+    set_page (self, LAYOUT_MORE_SYMBOLS);
     return;
   }
   if (g_strcmp0 (label, "Main") == 0) {
@@ -381,8 +388,14 @@ make_button (const char *label, const char *action_label, const char *style_clas
   gtk_widget_set_focus_on_click (button, FALSE);
   gtk_widget_set_size_request (button, 1, 1);
   gtk_style_context_add_class (context, "key");
-  if (style_class && *style_class)
-    gtk_style_context_add_class (context, style_class);
+  if (style_class && *style_class) {
+    char **classes = g_strsplit (style_class, " ", -1);
+    for (guint i = 0; classes[i]; i++) {
+      if (classes[i][0] != '\0')
+        gtk_style_context_add_class (context, classes[i]);
+    }
+    g_strfreev (classes);
+  }
   g_object_set_data_full (G_OBJECT (button), "myna-label", g_strdup (action_label), g_free);
 
   return button;
@@ -536,8 +549,10 @@ build_keyboard (MynaApp *self)
     page = MYNA_LAYOUT_PAGE_SYMBOLS;
   else if (self->page == LAYOUT_NUMBERS)
     page = MYNA_LAYOUT_PAGE_NUMBERS;
+  else if (self->page == LAYOUT_MORE_SYMBOLS)
+    page = MYNA_LAYOUT_PAGE_MORE_SYMBOLS;
 
-  snapshot = myna_layout_page_for_mode_new (page, myna_keyboard_mode (self->keyboard));
+  snapshot = myna_layout_page_for_keyboard_new (page, self->keyboard);
   if (!build_keyboard_from_snapshot (self, GTK_FIXED (fixed), snapshot))
     g_warning ("Failed to build keyboard from Rust layout snapshot");
   self->layout_snapshot = snapshot;

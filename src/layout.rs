@@ -180,6 +180,10 @@ pub fn default_key(label: &'static str) -> Key {
     key(label, label, DEFAULT_WIDTH, "")
 }
 
+pub fn letter_key(label: &'static str, action: &'static str) -> Key {
+    key(label, action, DEFAULT_WIDTH, "")
+}
+
 fn base_view(period_label: &'static str, period_action: &'static str) -> View {
     View::new(vec![
         Row::new("q w e r t y u i o p".split(' ').map(default_key).collect()),
@@ -205,6 +209,52 @@ fn base_view(period_label: &'static str, period_action: &'static str) -> View {
     ])
 }
 
+fn upper_base_view(period_label: &'static str, period_action: &'static str) -> View {
+    View::new(vec![
+        Row::new(vec![
+            letter_key("Q", "q"),
+            letter_key("W", "w"),
+            letter_key("E", "e"),
+            letter_key("R", "r"),
+            letter_key("T", "t"),
+            letter_key("Y", "y"),
+            letter_key("U", "u"),
+            letter_key("I", "i"),
+            letter_key("O", "o"),
+            letter_key("P", "p"),
+        ]),
+        Row::new(vec![
+            letter_key("A", "a"),
+            letter_key("S", "s"),
+            letter_key("D", "d"),
+            letter_key("F", "f"),
+            letter_key("G", "g"),
+            letter_key("H", "h"),
+            letter_key("J", "j"),
+            letter_key("K", "k"),
+            letter_key("L", "l"),
+        ]),
+        Row::new(vec![
+            key("⇧", "Shift", ALTLINE_WIDTH, "action active"),
+            letter_key("Z", "z"),
+            letter_key("X", "x"),
+            letter_key("C", "c"),
+            letter_key("V", "v"),
+            letter_key("B", "b"),
+            letter_key("N", "n"),
+            letter_key("M", "m"),
+            key("⌫", "Backspace", ALTLINE_WIDTH, "action"),
+        ]),
+        Row::new(vec![
+            key("?123", "Symbols", WIDE_WIDTH, "action"),
+            key("拼", "Mode", SPECIAL_WIDTH, "mode"),
+            key("space", "Space", SPACELINE_WIDTH, "space"),
+            key(period_label, period_action, SPECIAL_WIDTH, ""),
+            key("return", "Enter", WIDE_WIDTH, "action"),
+        ]),
+    ])
+}
+
 pub fn us_base_view() -> View {
     base_view(".", ".")
 }
@@ -213,12 +263,20 @@ pub fn pinyin_base_view() -> View {
     base_view("。", "。")
 }
 
+pub fn us_upper_base_view() -> View {
+    upper_base_view(".", ".")
+}
+
+pub fn pinyin_upper_base_view() -> View {
+    upper_base_view("。", "。")
+}
+
 pub fn symbols_view() -> View {
     View::new(vec![
         Row::new("1 2 3 4 5 6 7 8 9 0".split(' ').map(default_key).collect()),
-        Row::new("@ # $ _ & - + ( )".split(' ').map(default_key).collect()),
+        Row::new("@ # $ % & - _ + ( )".split(' ').map(default_key).collect()),
         Row::new(vec![
-            key("123", "Numbers", ALTLINE_WIDTH, "action"),
+            key("*/=", "MoreSymbols", ALTLINE_WIDTH, "action"),
             default_key("*"),
             default_key("\""),
             default_key("'"),
@@ -245,15 +303,16 @@ pub fn pinyin_symbols_view() -> View {
             key("＠", "＠", DEFAULT_WIDTH, ""),
             key("＃", "＃", DEFAULT_WIDTH, ""),
             key("￥", "￥", DEFAULT_WIDTH, ""),
-            key("＿", "＿", DEFAULT_WIDTH, ""),
+            key("％", "％", DEFAULT_WIDTH, ""),
             key("＆", "＆", DEFAULT_WIDTH, ""),
             key("－", "－", DEFAULT_WIDTH, ""),
+            key("＿", "＿", DEFAULT_WIDTH, ""),
             key("＋", "＋", DEFAULT_WIDTH, ""),
             key("（", "（", DEFAULT_WIDTH, ""),
             key("）", "）", DEFAULT_WIDTH, ""),
         ]),
         Row::new(vec![
-            key("123", "Numbers", ALTLINE_WIDTH, "action"),
+            key("*/=", "MoreSymbols", ALTLINE_WIDTH, "action"),
             key("＊", "＊", DEFAULT_WIDTH, ""),
             key("“", "“", DEFAULT_WIDTH, ""),
             key("‘", "‘", DEFAULT_WIDTH, ""),
@@ -261,6 +320,78 @@ pub fn pinyin_symbols_view() -> View {
             key("；", "；", DEFAULT_WIDTH, ""),
             key("！", "！", DEFAULT_WIDTH, ""),
             key("？", "？", DEFAULT_WIDTH, ""),
+            key("⌫", "Backspace", ALTLINE_WIDTH, "action"),
+        ]),
+        Row::new(vec![
+            key("ABC", "Main", WIDE_WIDTH, "action"),
+            key("，", "，", SPECIAL_WIDTH, ""),
+            key("space", "Space", SPACELINE_WIDTH, "space"),
+            key("。", "。", SPECIAL_WIDTH, ""),
+            key("return", "Enter", WIDE_WIDTH, "action"),
+        ]),
+    ])
+}
+
+pub fn more_symbols_view() -> View {
+    View::new(vec![
+        Row::new("~ ` | · √ π τ ÷ × ¶".split(' ').map(default_key).collect()),
+        Row::new("© ® £ € ¥ ^ ° = { }".split(' ').map(default_key).collect()),
+        Row::new(vec![
+            key("123", "Symbols", ALTLINE_WIDTH, "action"),
+            default_key("\\"),
+            default_key("/"),
+            default_key("<"),
+            default_key(">"),
+            default_key("="),
+            default_key("["),
+            default_key("]"),
+            key("⌫", "Backspace", ALTLINE_WIDTH, "action"),
+        ]),
+        Row::new(vec![
+            key("ABC", "Main", WIDE_WIDTH, "action"),
+            key(",", ",", SPECIAL_WIDTH, ""),
+            key("space", "Space", SPACELINE_WIDTH, "space"),
+            key(".", ".", SPECIAL_WIDTH, ""),
+            key("return", "Enter", WIDE_WIDTH, "action"),
+        ]),
+    ])
+}
+
+pub fn pinyin_more_symbols_view() -> View {
+    View::new(vec![
+        Row::new(vec![
+            key("～", "～", DEFAULT_WIDTH, ""),
+            key("｀", "｀", DEFAULT_WIDTH, ""),
+            key("｜", "｜", DEFAULT_WIDTH, ""),
+            key("·", "·", DEFAULT_WIDTH, ""),
+            key("√", "√", DEFAULT_WIDTH, ""),
+            key("π", "π", DEFAULT_WIDTH, ""),
+            key("τ", "τ", DEFAULT_WIDTH, ""),
+            key("÷", "÷", DEFAULT_WIDTH, ""),
+            key("×", "×", DEFAULT_WIDTH, ""),
+            key("¶", "¶", DEFAULT_WIDTH, ""),
+        ]),
+        Row::new(vec![
+            key("©", "©", DEFAULT_WIDTH, ""),
+            key("®", "®", DEFAULT_WIDTH, ""),
+            key("£", "£", DEFAULT_WIDTH, ""),
+            key("€", "€", DEFAULT_WIDTH, ""),
+            key("¥", "¥", DEFAULT_WIDTH, ""),
+            key("＾", "＾", DEFAULT_WIDTH, ""),
+            key("°", "°", DEFAULT_WIDTH, ""),
+            key("＝", "＝", DEFAULT_WIDTH, ""),
+            key("｛", "｛", DEFAULT_WIDTH, ""),
+            key("｝", "｝", DEFAULT_WIDTH, ""),
+        ]),
+        Row::new(vec![
+            key("123", "Symbols", ALTLINE_WIDTH, "action"),
+            key("＼", "＼", DEFAULT_WIDTH, ""),
+            key("／", "／", DEFAULT_WIDTH, ""),
+            key("《", "《", DEFAULT_WIDTH, ""),
+            key("》", "》", DEFAULT_WIDTH, ""),
+            key("＝", "＝", DEFAULT_WIDTH, ""),
+            key("［", "［", DEFAULT_WIDTH, ""),
+            key("］", "］", DEFAULT_WIDTH, ""),
             key("⌫", "Backspace", ALTLINE_WIDTH, "action"),
         ]),
         Row::new(vec![

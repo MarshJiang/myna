@@ -56,6 +56,7 @@ pub enum MynaLayoutPage {
     Main = 0,
     Symbols = 1,
     Numbers = 2,
+    MoreSymbols = 3,
 }
 
 struct MynaLayoutKeyRecord {
@@ -183,6 +184,11 @@ pub unsafe extern "C" fn myna_keyboard_free(kbd: *mut Keyboard) {
 #[no_mangle]
 pub unsafe extern "C" fn myna_keyboard_mode(kbd: *const Keyboard) -> MynaMode {
     kbd.as_ref().map(|kbd| kbd.mode).unwrap_or(MynaMode::Latin)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_keyboard_shifted(kbd: *const Keyboard) -> bool {
+    kbd.as_ref().map(|kbd| kbd.shifted).unwrap_or(false)
 }
 
 #[no_mangle]
@@ -424,12 +430,34 @@ pub extern "C" fn myna_layout_page_for_mode_new(
     page: MynaLayoutPage,
     mode: MynaMode,
 ) -> *mut MynaLayoutSnapshot {
+    layout_page_snapshot(page, mode, false)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn myna_layout_page_for_keyboard_new(
+    page: MynaLayoutPage,
+    kbd: *const Keyboard,
+) -> *mut MynaLayoutSnapshot {
+    let mode = myna_keyboard_mode(kbd);
+    let shifted = myna_keyboard_shifted(kbd);
+    layout_page_snapshot(page, mode, shifted)
+}
+
+fn layout_page_snapshot(
+    page: MynaLayoutPage,
+    mode: MynaMode,
+    shifted: bool,
+) -> *mut MynaLayoutSnapshot {
     let view = match page {
+        MynaLayoutPage::Main if mode == MynaMode::Pinyin && shifted => layout::pinyin_upper_base_view(),
+        MynaLayoutPage::Main if shifted => layout::us_upper_base_view(),
         MynaLayoutPage::Main if mode == MynaMode::Pinyin => layout::pinyin_base_view(),
         MynaLayoutPage::Main => layout::us_base_view(),
         MynaLayoutPage::Symbols if mode == MynaMode::Pinyin => layout::pinyin_symbols_view(),
         MynaLayoutPage::Symbols => layout::symbols_view(),
         MynaLayoutPage::Numbers => layout::numbers_view(),
+        MynaLayoutPage::MoreSymbols if mode == MynaMode::Pinyin => layout::pinyin_more_symbols_view(),
+        MynaLayoutPage::MoreSymbols => layout::more_symbols_view(),
     };
 
     Box::into_raw(Box::new(layout_snapshot(view)))
