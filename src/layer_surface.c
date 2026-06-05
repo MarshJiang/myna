@@ -80,7 +80,7 @@ myna_layer_surface_map (GtkWidget *widget)
       self->wl_surface,
       self->output,
       ZWLR_LAYER_SHELL_V1_LAYER_TOP,
-      "myna-osk");
+      "osk");
 
   zwlr_layer_surface_v1_set_anchor (
       self->layer_surface,
