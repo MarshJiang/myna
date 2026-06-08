@@ -17,6 +17,11 @@ typedef enum {
   LAYOUT_MORE_SYMBOLS,
 } LayoutPage;
 
+typedef enum {
+  CANDIDATE_SOURCE_TOUCH,
+  CANDIDATE_SOURCE_PHYSICAL,
+} CandidateSource;
+
 typedef struct _MynaApp MynaApp;
 
 typedef struct {
@@ -57,6 +62,8 @@ struct _MynaApp {
   GtkWidget *window;
   GtkWidget *candidate_scroller;
   GtkWidget *candidate_box;
+  GtkWidget *candidate_prev_button;
+  GtkWidget *candidate_next_button;
   GtkWidget *candidate_toggle_button;
   GtkWidget *candidate_panel;
   GtkWidget *preedit_label;
@@ -78,6 +85,7 @@ struct _MynaApp {
   gboolean activation_pending;
   gboolean candidate_panel_open;
   gboolean candidate_available;
+  CandidateSource candidate_source;
   LayoutPage page;
   char *session_client_id;
 };
@@ -99,6 +107,7 @@ static void refresh_view (MynaApp *self);
 static void rebuild_keyboard (MynaApp *self);
 static void set_visible (MynaApp *self, gboolean visible);
 static gboolean handle_action (MynaApp *self, MynaAction *action);
+static void handle_candidate_page (MynaApp *self, gboolean next);
 static gboolean relayout_keyboard_idle (gpointer user_data);
 static void register_gnome_session_client (MynaApp *self);
 static void unregister_gnome_session_client (MynaApp *self);
@@ -179,11 +188,19 @@ static bool
 on_wayland_physical_key (void *user_data, uint32_t keysym, const char *text)
 {
   MynaApp *self = user_data;
+  CandidateSource previous_source;
+  gboolean handled;
 
   if (!self->started)
     return false;
 
-  return handle_action (self, myna_keyboard_press_physical_key (self->keyboard, (int) keysym, text));
+  previous_source = self->candidate_source;
+  self->candidate_source = CANDIDATE_SOURCE_PHYSICAL;
+  handled = handle_action (self, myna_keyboard_press_physical_key (self->keyboard, (int) keysym, text));
+  if (!handled)
+    self->candidate_source = previous_source;
+
+  return handled;
 }
 
 static gboolean
@@ -210,6 +227,7 @@ handle_key_action (MynaApp *self, const char *label)
 {
   gboolean was_shifted = myna_keyboard_shifted (self->keyboard);
 
+  self->candidate_source = CANDIDATE_SOURCE_TOUCH;
   handle_action (self, myna_keyboard_press_label (self->keyboard, label));
   if (g_strcmp0 (label, "Mode") == 0 || was_shifted != myna_keyboard_shifted (self->keyboard)) {
     rebuild_keyboard (self);
@@ -266,6 +284,7 @@ on_candidate_clicked (GtkButton *button, gpointer user_data)
   MynaApp *self = user_data;
   size_t index = GPOINTER_TO_SIZE (g_object_get_data (G_OBJECT (button), "myna-index"));
 
+  self->candidate_source = CANDIDATE_SOURCE_TOUCH;
   self->candidate_panel_open = FALSE;
   gtk_stack_set_visible_child_name (GTK_STACK (self->keyboard_area), "keyboard");
   handle_action (self, myna_keyboard_select_candidate (self->keyboard, index));
@@ -286,6 +305,22 @@ on_candidates_toggle_clicked (GtkButton *button, gpointer user_data)
     return;
   }
   refresh_view (self);
+}
+
+static void
+on_candidate_page_clicked (GtkButton *button, gpointer user_data)
+{
+  MynaApp *self = user_data;
+  gboolean next = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (button), "myna-page-next"));
+
+  handle_candidate_page (self, next);
+}
+
+static void
+handle_candidate_page (MynaApp *self, gboolean next)
+{
+  self->candidate_source = CANDIDATE_SOURCE_PHYSICAL;
+  handle_action (self, myna_keyboard_page_candidates (self->keyboard, next));
 }
 
 static const char *
@@ -740,8 +775,19 @@ refresh_view (MynaApp *self)
 
   gboolean has_preedit = view->preedit && view->preedit[0] != '\0';
   self->candidate_available = has_preedit && view->candidate_count > 0;
-  if (!self->candidate_available)
+  if (!self->candidate_available) {
     self->candidate_panel_open = FALSE;
+    self->candidate_source = CANDIDATE_SOURCE_TOUCH;
+  }
+
+  gboolean show_page_buttons =
+      self->candidate_source == CANDIDATE_SOURCE_PHYSICAL &&
+      self->candidate_available &&
+      (view->can_page_previous || view->can_page_next);
+  gtk_widget_set_visible (self->candidate_prev_button, show_page_buttons);
+  gtk_widget_set_visible (self->candidate_next_button, show_page_buttons);
+  gtk_widget_set_sensitive (self->candidate_prev_button, view->can_page_previous);
+  gtk_widget_set_sensitive (self->candidate_next_button, view->can_page_next);
 
   gtk_button_set_label (
       GTK_BUTTON (self->candidate_toggle_button),
@@ -785,8 +831,10 @@ set_visible (MynaApp *self, gboolean visible)
 
   if (visible) {
     gtk_widget_show_all (self->window);
+    refresh_view (self);
   } else {
     self->candidate_panel_open = FALSE;
+    self->candidate_source = CANDIDATE_SOURCE_TOUCH;
     handle_action (self, myna_keyboard_clear_composition (self->keyboard));
     gtk_widget_hide (self->window);
   }
@@ -1087,6 +1135,8 @@ install_css (void)
     ".candidate:active { background: rgba(255,255,255,0.12); }"
     ".candidate-primary { background: #f0f2f5; color: #202124; font-weight: 700; }"
     ".candidate-toggle { min-width: 34px; color: #e5e7eb; padding-left: 6px; padding-right: 6px; }"
+    ".candidate-page { min-width: 30px; color: #e5e7eb; padding-left: 5px; padding-right: 5px; }"
+    ".candidate-page:disabled { opacity: 0.38; }"
     ".hide-key { min-width: 34px; color: #e5e7eb; }"
     ".candidate-cell { border-radius: 4px; margin: 2px; padding: 6px 8px; font-size: 18px; min-height: 42px; background: #f0f2f5; color: #202124; border: 0; }"
     ".candidate-cell:active { background: #dfe3e8; }"
@@ -1170,6 +1220,26 @@ activate (GtkApplication *app, gpointer user_data)
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->candidate_scroller), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
   gtk_widget_set_hexpand (self->candidate_scroller, TRUE);
   gtk_box_pack_start (GTK_BOX (candidate_row), self->candidate_scroller, TRUE, TRUE, 0);
+
+  self->candidate_prev_button = gtk_button_new_with_label ("‹");
+  gtk_widget_set_can_focus (self->candidate_prev_button, FALSE);
+  gtk_widget_set_focus_on_click (self->candidate_prev_button, FALSE);
+  gtk_widget_set_no_show_all (self->candidate_prev_button, TRUE);
+  gtk_style_context_add_class (gtk_widget_get_style_context (self->candidate_prev_button), "candidate");
+  gtk_style_context_add_class (gtk_widget_get_style_context (self->candidate_prev_button), "candidate-page");
+  g_object_set_data (G_OBJECT (self->candidate_prev_button), "myna-page-next", GINT_TO_POINTER (FALSE));
+  g_signal_connect (self->candidate_prev_button, "clicked", G_CALLBACK (on_candidate_page_clicked), self);
+  gtk_box_pack_start (GTK_BOX (candidate_row), self->candidate_prev_button, FALSE, FALSE, 0);
+
+  self->candidate_next_button = gtk_button_new_with_label ("›");
+  gtk_widget_set_can_focus (self->candidate_next_button, FALSE);
+  gtk_widget_set_focus_on_click (self->candidate_next_button, FALSE);
+  gtk_widget_set_no_show_all (self->candidate_next_button, TRUE);
+  gtk_style_context_add_class (gtk_widget_get_style_context (self->candidate_next_button), "candidate");
+  gtk_style_context_add_class (gtk_widget_get_style_context (self->candidate_next_button), "candidate-page");
+  g_object_set_data (G_OBJECT (self->candidate_next_button), "myna-page-next", GINT_TO_POINTER (TRUE));
+  g_signal_connect (self->candidate_next_button, "clicked", G_CALLBACK (on_candidate_page_clicked), self);
+  gtk_box_pack_start (GTK_BOX (candidate_row), self->candidate_next_button, FALSE, FALSE, 0);
 
   self->candidate_toggle_button = gtk_button_new_with_label ("⌄");
   gtk_widget_set_can_focus (self->candidate_toggle_button, FALSE);

@@ -16,6 +16,8 @@ typedef struct {
   char *preedit;
   size_t candidate_count;
   char **candidates;
+  bool can_page_previous;
+  bool can_page_next;
 } MynaView;
 
 typedef struct {
@@ -63,6 +65,9 @@ MynaAction *myna_keyboard_press_physical_key
                                               (Keyboard *kbd,
                                                int keysym,
                                                const char *text);
+MynaAction *myna_keyboard_page_candidates
+                                              (Keyboard *kbd,
+                                               bool next);
 MynaAction *myna_keyboard_select_candidate (Keyboard *kbd, size_t index);
 MynaAction *myna_keyboard_clear_composition(Keyboard *kbd);
 MynaView   *myna_keyboard_view             (Keyboard *kbd);

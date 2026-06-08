@@ -17,6 +17,8 @@ pub struct MynaView {
     pub preedit: *mut c_char,
     pub candidate_count: usize,
     pub candidates: *mut *mut c_char,
+    pub can_page_previous: bool,
+    pub can_page_next: bool,
 }
 
 #[repr(C)]
@@ -79,11 +81,14 @@ unsafe extern "C" {
     fn myna_rime_destroy(handle: *mut c_void);
     fn myna_rime_process_key(handle: *mut c_void, key: c_int) -> bool;
     fn myna_rime_select_candidate(handle: *mut c_void, index: usize) -> bool;
+    fn myna_rime_page_candidates(handle: *mut c_void, next: bool) -> bool;
     fn myna_rime_clear(handle: *mut c_void);
     fn myna_rime_take_commit(handle: *mut c_void) -> *mut c_char;
     fn myna_rime_get_preedit(handle: *mut c_void) -> *mut c_char;
     fn myna_rime_get_candidate_count(handle: *mut c_void) -> usize;
     fn myna_rime_get_candidate(handle: *mut c_void, index: usize) -> *mut c_char;
+    fn myna_rime_can_page_previous(handle: *mut c_void) -> bool;
+    fn myna_rime_can_page_next(handle: *mut c_void) -> bool;
     fn myna_rime_is_composing(handle: *mut c_void) -> bool;
     fn myna_rime_string_free(value: *mut c_char);
 }
@@ -310,6 +315,8 @@ pub unsafe extern "C" fn myna_keyboard_press_physical_key(
     text: *const c_char,
 ) -> *mut MynaAction {
     const XKB_KEY_BACKSPACE: c_int = 0xff08;
+    const XKB_KEY_PAGE_UP: c_int = 0xff55;
+    const XKB_KEY_PAGE_DOWN: c_int = 0xff56;
     const XKB_KEY_RETURN: c_int = 0xff0d;
     const XKB_KEY_ESCAPE: c_int = 0xff1b;
     const XKB_KEY_KP_ENTER: c_int = 0xff8d;
@@ -322,6 +329,8 @@ pub unsafe extern "C" fn myna_keyboard_press_physical_key(
         && myna_rime_is_composing(kbd.rime);
 
     match keysym {
+        XKB_KEY_PAGE_UP if composing => return myna_keyboard_page_candidates(kbd, false),
+        XKB_KEY_PAGE_DOWN if composing => return myna_keyboard_page_candidates(kbd, true),
         XKB_KEY_BACKSPACE if composing => return handle_backspace(kbd),
         XKB_KEY_RETURN | XKB_KEY_KP_ENTER if composing => return handle_enter(kbd),
         XKB_KEY_ESCAPE if composing => {
@@ -384,6 +393,25 @@ pub unsafe extern "C" fn myna_keyboard_press_physical_key(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn myna_keyboard_page_candidates(
+    kbd: *mut Keyboard,
+    next: bool,
+) -> *mut MynaAction {
+    let Some(kbd) = kbd.as_mut() else {
+        return action(None, false);
+    };
+
+    if kbd.mode == MynaMode::Pinyin && !kbd.rime.is_null() && myna_rime_is_composing(kbd.rime) {
+        if myna_rime_page_candidates(kbd.rime, next) {
+            let commit = take_optional_string(myna_rime_take_commit(kbd.rime));
+            return action(commit, true);
+        }
+    }
+
+    action(None, false)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn myna_keyboard_select_candidate(
     kbd: *mut Keyboard,
     index: usize,
@@ -432,6 +460,8 @@ pub unsafe extern "C" fn myna_keyboard_view(kbd: *mut Keyboard) -> *mut MynaView
     };
 
     let mut candidates = Vec::new();
+    let mut can_page_previous = false;
+    let mut can_page_next = false;
     if kbd.mode == MynaMode::Pinyin && !kbd.rime.is_null() {
         let count = myna_rime_get_candidate_count(kbd.rime).min(24);
         for index in 0..count {
@@ -440,6 +470,8 @@ pub unsafe extern "C" fn myna_keyboard_view(kbd: *mut Keyboard) -> *mut MynaView
                 candidates.push(candidate);
             }
         }
+        can_page_previous = myna_rime_can_page_previous(kbd.rime);
+        can_page_next = myna_rime_can_page_next(kbd.rime);
     }
 
     let candidate_count = candidates.len();
@@ -457,6 +489,8 @@ pub unsafe extern "C" fn myna_keyboard_view(kbd: *mut Keyboard) -> *mut MynaView
         preedit,
         candidate_count,
         candidates,
+        can_page_previous,
+        can_page_next,
     }))
 }
 

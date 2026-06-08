@@ -62,7 +62,9 @@ is_text_input_keysym (xkb_keysym_t keysym)
   return keysym == XKB_KEY_BackSpace ||
          keysym == XKB_KEY_Return ||
          keysym == XKB_KEY_KP_Enter ||
-         keysym == XKB_KEY_Escape;
+         keysym == XKB_KEY_Escape ||
+         keysym == XKB_KEY_Page_Up ||
+         keysym == XKB_KEY_Page_Down;
 }
 
 static bool

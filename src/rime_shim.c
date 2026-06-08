@@ -143,6 +143,15 @@ myna_rime_select_candidate (MynaRime *self, size_t index)
   return true;
 }
 
+bool
+myna_rime_page_candidates (MynaRime *self, bool next)
+{
+  if (!self || !self->session)
+    return false;
+
+  return self->api->process_key (self->session, next ? 0xff56 : 0xff55, 0);
+}
+
 void
 myna_rime_clear (MynaRime *self)
 {
@@ -215,6 +224,36 @@ myna_rime_get_candidate (MynaRime *self, size_t index)
 
   self->api->free_context (&context);
   return candidate;
+}
+
+bool
+myna_rime_can_page_previous (MynaRime *self)
+{
+  if (!self || !self->session)
+    return false;
+
+  RIME_STRUCT (RimeContext, context);
+  if (!self->api->get_context (self->session, &context))
+    return false;
+
+  bool can_page = context.menu.page_no > 0;
+  self->api->free_context (&context);
+  return can_page;
+}
+
+bool
+myna_rime_can_page_next (MynaRime *self)
+{
+  if (!self || !self->session)
+    return false;
+
+  RIME_STRUCT (RimeContext, context);
+  if (!self->api->get_context (self->session, &context))
+    return false;
+
+  bool can_page = !context.menu.is_last_page;
+  self->api->free_context (&context);
+  return can_page;
 }
 
 bool
