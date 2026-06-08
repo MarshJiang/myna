@@ -98,6 +98,7 @@ static const char introspection_xml[] =
 static void refresh_view (MynaApp *self);
 static void rebuild_keyboard (MynaApp *self);
 static void set_visible (MynaApp *self, gboolean visible);
+static gboolean handle_action (MynaApp *self, MynaAction *action);
 static gboolean relayout_keyboard_idle (gpointer user_data);
 static void register_gnome_session_client (MynaApp *self);
 static void unregister_gnome_session_client (MynaApp *self);
@@ -107,6 +108,7 @@ static void on_session_client_signal (GDBusProxy *proxy,
                                       const char *signal_name,
                                       GVariant *parameters,
                                       gpointer user_data);
+static bool on_wayland_physical_key (void *user_data, uint32_t keysym, const char *text);
 
 static int
 panel_height_for_screen (void)
@@ -173,11 +175,26 @@ on_wayland_visibility_requested (void *user_data, bool visible)
   set_visible (self, visible);
 }
 
-static void
+static bool
+on_wayland_physical_key (void *user_data, uint32_t keysym, const char *text)
+{
+  MynaApp *self = user_data;
+
+  if (!self->started)
+    return false;
+
+  return handle_action (self, myna_keyboard_press_physical_key (self->keyboard, (int) keysym, text));
+}
+
+static gboolean
 handle_action (MynaApp *self, MynaAction *action)
 {
+  gboolean handled;
+
   if (!action)
-    return;
+    return FALSE;
+
+  handled = (action->commit && action->commit[0] != '\0') || action->request_refresh;
 
   submit_text (self, action->commit);
 
@@ -185,6 +202,7 @@ handle_action (MynaApp *self, MynaAction *action)
     refresh_view (self);
 
   myna_action_free (action);
+  return handled;
 }
 
 static void
@@ -1123,6 +1141,7 @@ activate (GtkApplication *app, gpointer user_data)
   self->keyboard = myna_keyboard_new ();
 
   myna_wayland_set_visibility_callback (&self->wayland, on_wayland_visibility_requested, self);
+  myna_wayland_set_physical_key_callback (&self->wayland, on_wayland_physical_key, self);
   if (!myna_wayland_init (&self->wayland))
     g_warning ("Wayland setup was incomplete");
 

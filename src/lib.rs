@@ -304,6 +304,86 @@ unsafe fn handle_enter(kbd: &mut Keyboard) -> *mut MynaAction {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn myna_keyboard_press_physical_key(
+    kbd: *mut Keyboard,
+    keysym: c_int,
+    text: *const c_char,
+) -> *mut MynaAction {
+    const XKB_KEY_BACKSPACE: c_int = 0xff08;
+    const XKB_KEY_RETURN: c_int = 0xff0d;
+    const XKB_KEY_ESCAPE: c_int = 0xff1b;
+    const XKB_KEY_KP_ENTER: c_int = 0xff8d;
+
+    let Some(kbd) = kbd.as_mut() else {
+        return action(None, false);
+    };
+    let composing = kbd.mode == MynaMode::Pinyin
+        && !kbd.rime.is_null()
+        && myna_rime_is_composing(kbd.rime);
+
+    match keysym {
+        XKB_KEY_BACKSPACE if composing => return handle_backspace(kbd),
+        XKB_KEY_RETURN | XKB_KEY_KP_ENTER if composing => return handle_enter(kbd),
+        XKB_KEY_ESCAPE if composing => {
+            myna_rime_clear(kbd.rime);
+            return action(None, true);
+        }
+        XKB_KEY_BACKSPACE
+        | XKB_KEY_RETURN
+        | XKB_KEY_KP_ENTER
+        | XKB_KEY_ESCAPE => return action(None, false),
+        _ => {}
+    }
+
+    if text.is_null() {
+        return action(None, false);
+    }
+
+    let text = CStr::from_ptr(text).to_string_lossy();
+    if text.is_empty() || text.chars().any(|ch| ch.is_control()) {
+        return action(None, false);
+    }
+
+    match kbd.mode {
+        MynaMode::Latin => action(None, false),
+        MynaMode::Pinyin => {
+            let mut chars = text.chars();
+            let first = chars.next();
+            let single_char = first.filter(|_| chars.next().is_none());
+
+            if let Some(ch) = single_char {
+                if ch == ' ' {
+                    return if composing {
+                        handle_space(kbd)
+                    } else {
+                        action(None, false)
+                    };
+                }
+
+                if ch.is_ascii_alphabetic()
+                    || ch.is_ascii_punctuation()
+                    || (composing && ch.is_ascii_digit())
+                {
+                    let rime = ensure_rime(kbd);
+                    let rime_key = if ch.is_ascii_alphabetic() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        ch
+                    };
+                    let handled = myna_rime_process_key(rime, rime_key as c_int);
+                    let commit = take_optional_string(myna_rime_take_commit(rime));
+                    if commit.is_some() || handled || myna_rime_is_composing(rime) {
+                        return action(commit, true);
+                    }
+                }
+            }
+
+            action(None, false)
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn myna_keyboard_select_candidate(
     kbd: *mut Keyboard,
     index: usize,
