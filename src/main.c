@@ -9,6 +9,7 @@
 #define APP_ID "mobi.phosh.MynaOsk"
 #define OSK_BUS_NAME "sm.puri.OSK0"
 #define OSK_OBJECT_PATH "/sm/puri/OSK0"
+#define PHYSICAL_CANDIDATE_PANEL_HEIGHT 52
 
 typedef enum {
   LAYOUT_MAIN,
@@ -85,7 +86,11 @@ struct _MynaApp {
   gboolean activation_pending;
   gboolean candidate_panel_open;
   gboolean candidate_available;
+  gboolean candidate_composing;
   CandidateSource candidate_source;
+  int full_panel_height;
+  int candidate_panel_height;
+  int current_panel_height;
   LayoutPage page;
   char *session_client_id;
 };
@@ -106,6 +111,7 @@ static const char introspection_xml[] =
 static void refresh_view (MynaApp *self);
 static void rebuild_keyboard (MynaApp *self);
 static void set_visible (MynaApp *self, gboolean visible);
+static void apply_panel_mode (MynaApp *self);
 static gboolean handle_action (MynaApp *self, MynaAction *action);
 static void handle_candidate_page (MynaApp *self, gboolean next);
 static gboolean relayout_keyboard_idle (gpointer user_data);
@@ -298,7 +304,7 @@ on_candidates_toggle_clicked (GtkButton *button, gpointer user_data)
 
   if (self->candidate_panel_open) {
     self->candidate_panel_open = FALSE;
-  } else if (self->candidate_available) {
+  } else if (self->candidate_available && self->candidate_source != CANDIDATE_SOURCE_PHYSICAL) {
     self->candidate_panel_open = TRUE;
   } else {
     set_visible (self, FALSE);
@@ -774,9 +780,12 @@ refresh_view (MynaApp *self)
   clear_container (self->candidate_box);
 
   gboolean has_preedit = view->preedit && view->preedit[0] != '\0';
+  self->candidate_composing = has_preedit;
   self->candidate_available = has_preedit && view->candidate_count > 0;
   if (!self->candidate_available) {
     self->candidate_panel_open = FALSE;
+  }
+  if (!self->candidate_composing) {
     self->candidate_source = CANDIDATE_SOURCE_TOUCH;
   }
 
@@ -784,6 +793,8 @@ refresh_view (MynaApp *self)
       self->candidate_source == CANDIDATE_SOURCE_PHYSICAL &&
       self->candidate_available &&
       (view->can_page_previous || view->can_page_next);
+  if (self->candidate_source == CANDIDATE_SOURCE_PHYSICAL)
+    self->candidate_panel_open = FALSE;
   gtk_widget_set_visible (self->candidate_prev_button, show_page_buttons);
   gtk_widget_set_visible (self->candidate_next_button, show_page_buttons);
   gtk_widget_set_sensitive (self->candidate_prev_button, view->can_page_previous);
@@ -791,7 +802,8 @@ refresh_view (MynaApp *self)
 
   gtk_button_set_label (
       GTK_BUTTON (self->candidate_toggle_button),
-      self->candidate_panel_open ? "‹" : (self->candidate_available ? "›" : "⌄"));
+      self->candidate_panel_open ? "‹" :
+      (self->candidate_available && self->candidate_source != CANDIDATE_SOURCE_PHYSICAL ? "›" : "⌄"));
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->candidate_scroller), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
   gtk_widget_set_size_request (self->candidate_scroller, 1, 38);
 
@@ -821,7 +833,32 @@ refresh_view (MynaApp *self)
   gtk_widget_show_all (self->candidate_box);
   if (self->candidate_panel_open)
     gtk_widget_show_all (self->candidate_panel);
+  apply_panel_mode (self);
   myna_view_free (view);
+}
+
+static void
+apply_panel_mode (MynaApp *self)
+{
+  gboolean physical_candidate_mode =
+      self->candidate_source == CANDIDATE_SOURCE_PHYSICAL &&
+      self->candidate_composing;
+  int target_height = physical_candidate_mode ? self->candidate_panel_height : self->full_panel_height;
+
+  if (!self->window || !self->keyboard_area)
+    return;
+
+  gtk_widget_set_visible (self->keyboard_area, !physical_candidate_mode);
+  if (self->current_panel_height != target_height) {
+    self->current_panel_height = target_height;
+    myna_layer_surface_set_panel_height (MYNA_LAYER_SURFACE (self->window), target_height);
+  }
+
+  if (!physical_candidate_mode && self->keyboard_fixed) {
+    gtk_widget_queue_resize (self->keyboard_area);
+    gtk_widget_queue_resize (self->keyboard_fixed);
+    g_idle_add (relayout_keyboard_idle, self);
+  }
 }
 
 static void
@@ -835,6 +872,7 @@ set_visible (MynaApp *self, gboolean visible)
   } else {
     self->candidate_panel_open = FALSE;
     self->candidate_source = CANDIDATE_SOURCE_TOUCH;
+    apply_panel_mode (self);
     handle_action (self, myna_keyboard_clear_composition (self->keyboard));
     gtk_widget_hide (self->window);
   }
@@ -1198,6 +1236,9 @@ activate (GtkApplication *app, gpointer user_data)
   install_css ();
   height = panel_height_for_screen ();
   keyboard_height = CLAMP (height - 58, 206, 264);
+  self->full_panel_height = height;
+  self->candidate_panel_height = PHYSICAL_CANDIDATE_PANEL_HEIGHT;
+  self->current_panel_height = height;
   self->window = myna_layer_surface_new (self->wayland.layer_shell, self->wayland.output, height);
   gtk_application_add_window (app, GTK_WINDOW (self->window));
 
