@@ -77,3 +77,9 @@ Rime may report missing schemas if the user's schema list references data files
 that are not installed on the device.
 
 This repository was prepared without local device compilation or runtime tests.
+
+## License
+
+Myna’s own code is licensed under the [GNU General Public License version 3
+or later](LICENSE). Third-party protocol files in `protocols/` retain their
+original copyright and license notices.

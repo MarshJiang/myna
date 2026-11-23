@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "bridge.h"
 
 #include <gdk/gdkwayland.h>

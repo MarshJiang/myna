@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include <gio/gio.h>
 #include <gtk/gtk.h>
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Size {
     pub width: f64,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "rime_shim.h"
 
 #include <glib.h>
