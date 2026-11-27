@@ -278,7 +278,7 @@ pub fn symbols_view() -> View {
         Row::new("1 2 3 4 5 6 7 8 9 0".split(' ').map(default_key).collect()),
         Row::new("@ # $ % & - _ + ( )".split(' ').map(default_key).collect()),
         Row::new(vec![
-            key("*/=", "MoreSymbols", ALTLINE_WIDTH, "action"),
+            key("更多", "MoreSymbols", ALTLINE_WIDTH, "action"),
             default_key("*"),
             default_key("\""),
             default_key("'"),
@@ -314,7 +314,7 @@ pub fn pinyin_symbols_view() -> View {
             key("）", "）", DEFAULT_WIDTH, ""),
         ]),
         Row::new(vec![
-            key("*/=", "MoreSymbols", ALTLINE_WIDTH, "action"),
+            key("更多", "MoreSymbols", ALTLINE_WIDTH, "action"),
             key("＊", "＊", DEFAULT_WIDTH, ""),
             key("“", "“", DEFAULT_WIDTH, ""),
             key("‘", "‘", DEFAULT_WIDTH, ""),
@@ -344,7 +344,7 @@ pub fn more_symbols_view() -> View {
             default_key("/"),
             default_key("<"),
             default_key(">"),
-            default_key("="),
+            default_key("≠"),
             default_key("["),
             default_key("]"),
             key("⌫", "Backspace", ALTLINE_WIDTH, "action"),
@@ -391,7 +391,7 @@ pub fn pinyin_more_symbols_view() -> View {
             key("／", "／", DEFAULT_WIDTH, ""),
             key("《", "《", DEFAULT_WIDTH, ""),
             key("》", "》", DEFAULT_WIDTH, ""),
-            key("＝", "＝", DEFAULT_WIDTH, ""),
+            key("≠", "≠", DEFAULT_WIDTH, ""),
             key("［", "［", DEFAULT_WIDTH, ""),
             key("］", "］", DEFAULT_WIDTH, ""),
             key("⌫", "Backspace", ALTLINE_WIDTH, "action"),
@@ -442,9 +442,9 @@ mod tests {
         let first_row_width = DEFAULT_WIDTH * 10.0;
         let second_row_width = DEFAULT_WIDTH * 9.0;
 
-        assert!((view.size.width - first_row_width).abs() < 0.001);
-        assert!((view.rows[0].0.x - 0.0).abs() < 0.001);
-        assert!((view.rows[1].0.x - (first_row_width - second_row_width) / 2.0).abs() < 0.001);
+        assert!((view.size.width - 354.0).abs() < 0.001);
+        assert!((view.rows[0].0.x - (354.0 - first_row_width) / 2.0).abs() < 0.001);
+        assert!((view.rows[1].0.x - (354.0 - second_row_width) / 2.0).abs() < 0.001);
         assert_eq!(view.size.height, DEFAULT_HEIGHT * 4.0);
     }
 
