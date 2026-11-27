@@ -46,6 +46,22 @@ meson setup build
 ninja -C build
 ```
 
+To build a Debian package on Debian, Ubuntu, or Droidian, install the same
+development dependencies plus `debhelper-compat`, then run:
+
+```sh
+dpkg-buildpackage -us -uc
+```
+
+The resulting `myna-osk_*.deb` is written to the parent directory. Install it
+with `sudo apt install ./myna-osk_*.deb`.
+
+Every push to `main` and every pull request runs the Rust tests, a Meson build,
+and Debian package builds for `amd64` and `arm64` through GitHub Actions.
+Successful workflow runs publish the generated packages as downloadable
+artifacts. Pushing a tag such as `v0.1.0` automatically creates a GitHub
+Release with both packages attached and generated release notes.
+
 Install and reload the Phosh OSK service metadata:
 
 ```sh

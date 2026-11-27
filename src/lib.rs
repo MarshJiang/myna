@@ -76,7 +76,7 @@ pub struct MynaLayoutSnapshot {
     keys: Vec<MynaLayoutKeyRecord>,
 }
 
-unsafe extern "C" {
+extern "C" {
     fn myna_rime_create() -> *mut c_void;
     fn myna_rime_destroy(handle: *mut c_void);
     fn myna_rime_process_key(handle: *mut c_void, key: c_int) -> bool;

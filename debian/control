@@ -1,0 +1,32 @@
+Source: myna-osk
+Section: utils
+Priority: optional
+Maintainer: Marsh Jiang <1208879283@qq.com>
+Build-Depends:
+ build-essential,
+ debhelper-compat (= 13),
+ cargo,
+ libglib2.0-dev,
+ libgtk-3-dev,
+ librime-dev,
+ libsystemd-dev,
+ libwayland-dev,
+ libxkbcommon-dev,
+ meson,
+ ninja-build,
+ pkg-config,
+ rustc,
+ wayland-protocols
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: myna-osk
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ librime-data
+Description: Chinese Pinyin on-screen keyboard for Phosh
+ Myna is a small Phosh/Droidian on-screen keyboard focused on Chinese
+ Pinyin input through Rime. It provides a Wayland input-method-v2 panel
+ and integrates with the Phosh OSK alternatives system.
