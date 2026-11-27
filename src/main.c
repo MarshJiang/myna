@@ -1062,6 +1062,13 @@ on_session_client_signal (GDBusProxy *proxy,
 static void
 install_css (void)
 {
+  GtkStyleContext *theme_context;
+  GtkWidgetPath *theme_path;
+  GdkRGBA selected_bg;
+  GdkRGBA selected_fg;
+  char *selected_bg_css;
+  char *selected_fg_css;
+  char *return_css;
   static const char css[] =
     "window { background: #18181b; }"
     ".root { padding: 7px 8px 8px 8px; }"
@@ -1082,8 +1089,6 @@ install_css (void)
     ".action:active { background: #504d57; }"
     ".active { background: #6d6878; color: #ffffff; }"
     ".active:active { background: #7c7688; color: #ffffff; }"
-    ".return-key { background: @theme_selected_bg_color; color: @theme_selected_fg_color; font-size: 14px; font-weight: 700; }"
-    ".return-key:active { background: shade(@theme_selected_bg_color, 1.15); color: @theme_selected_fg_color; }"
     ".switch-key { font-size: 14px; letter-spacing: 0; }"
     ".backspace, .shift-key { font-size: 20px; }"
     ".alternate { border-radius: 4px; min-width: 40px; min-height: 36px; font-size: 18px; }"
@@ -1098,6 +1103,38 @@ install_css (void)
       GTK_STYLE_PROVIDER (provider),
       GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   g_object_unref (provider);
+
+  theme_context = gtk_style_context_new ();
+  theme_path = gtk_widget_path_new ();
+  gtk_widget_path_append_type (theme_path, GTK_TYPE_BUTTON);
+  gtk_style_context_set_path (theme_context, theme_path);
+  gtk_style_context_set_screen (theme_context, gdk_screen_get_default ());
+  gdk_rgba_parse (&selected_bg, "#3584e4");
+  gdk_rgba_parse (&selected_fg, "#ffffff");
+  gtk_style_context_lookup_color (theme_context, "theme_selected_bg_color", &selected_bg);
+  gtk_style_context_lookup_color (theme_context, "theme_selected_fg_color", &selected_fg);
+  selected_bg_css = gdk_rgba_to_string (&selected_bg);
+  selected_fg_css = gdk_rgba_to_string (&selected_fg);
+  return_css = g_strdup_printf (
+      ".return-key { background: %s; color: %s; font-size: 14px; font-weight: 700; }"
+      ".return-key:active { background: shade(%s, 1.15); color: %s; }",
+      selected_bg_css,
+      selected_fg_css,
+      selected_bg_css,
+      selected_fg_css);
+
+  provider = gtk_css_provider_new ();
+  gtk_css_provider_load_from_data (provider, return_css, -1, NULL);
+  gtk_style_context_add_provider_for_screen (
+      gdk_screen_get_default (),
+      GTK_STYLE_PROVIDER (provider),
+      GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+  g_object_unref (provider);
+  g_free (return_css);
+  g_free (selected_bg_css);
+  g_free (selected_fg_css);
+  gtk_widget_path_free (theme_path);
+  g_object_unref (theme_context);
 }
 
 static void
