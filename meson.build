@@ -74,6 +74,7 @@ executable(
     'src/bridge.c',
     'src/layer_surface.c',
     'src/rime_shim.c',
+    'src/settings.c',
     myna_resources,
     wl_generated,
   ],
@@ -90,11 +91,31 @@ executable(
   install: true,
 )
 
+executable(
+  'myna-settings',
+  ['src/settings-app.c', 'src/settings.c'],
+  dependencies: [gtk_dep, gio_dep],
+  install: true,
+)
+
+install_data(
+  'data/mobi.phosh.MynaOsk.gschema.xml',
+  install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
+)
+gnome.post_install(glib_compile_schemas: true)
+
 desktop_conf = configuration_data()
 desktop_conf.set('bindir', get_option('prefix') / get_option('bindir'))
 configure_file(
   input: 'data/mobi.phosh.MynaOsk.desktop.in',
   output: 'mobi.phosh.MynaOsk.desktop',
+  configuration: desktop_conf,
+  install_dir: get_option('datadir') / 'applications',
+)
+
+configure_file(
+  input: 'data/mobi.phosh.MynaOsk.Settings.desktop.in',
+  output: 'mobi.phosh.MynaOsk.Settings.desktop',
   configuration: desktop_conf,
   install_dir: get_option('datadir') / 'applications',
 )

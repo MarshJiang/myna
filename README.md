@@ -21,6 +21,15 @@ The project is intentionally split in two layers:
 - Pinyin mode backed by librime candidates and commit text.
 - Text submission through `zwp_input_method_v2.commit_string`.
 - UTF-8 aware deletion when surrounding text is available.
+- A settings app for the default input mode and keyboard height, with a field
+  for trying the keyboard.
+
+## Settings
+
+After installation, open **Myna Settings** from the application list, or run
+`myna-settings`. The default input mode takes effect when the OSK starts.
+Keyboard height changes take effect the next time the keyboard opens. The
+settings app and OSK share per-user settings and are installed together.
 
 ## Layout and screen adaptation
 

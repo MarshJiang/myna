@@ -7,6 +7,7 @@
 #include "layer_surface.h"
 #include "myna_rs.h"
 #include "rime_shim.h"
+#include "settings.h"
 
 #define APP_ID "mobi.phosh.MynaOsk"
 #define OSK_BUS_NAME "sm.puri.OSK0"
@@ -56,6 +57,7 @@ struct _MynaApp {
   GtkApplication *app;
   MynaWayland wayland;
   Keyboard *keyboard;
+  GSettings *settings;
   GtkWidget *window;
   GtkWidget *candidate_scroller;
   GtkWidget *candidate_box;
@@ -111,7 +113,7 @@ static void on_session_client_signal (GDBusProxy *proxy,
                                       gpointer user_data);
 
 static int
-panel_height_for_screen (void)
+panel_height_for_screen (GSettings *settings)
 {
   GdkDisplay *display = gdk_display_get_default ();
   GdkMonitor *monitor = gdk_display_get_primary_monitor (display);
@@ -125,24 +127,44 @@ panel_height_for_screen (void)
     monitor = gdk_display_get_monitor (display, 0);
   if (!monitor) {
     g_warning ("No monitor available for panel sizing; using fallback height 320");
-    return 320;
+    height = 320;
+  } else {
+    gdk_monitor_get_geometry (monitor, &geometry);
+    scale = MAX (1, gdk_monitor_get_scale_factor (monitor));
+    logical_width = geometry.width / scale;
+    logical_height = geometry.height / scale;
+    height = CLAMP (logical_width * 280 / 360, 280, 336);
+
+    g_message ("Panel size: monitor=%dx%d scale=%d logical=%dx%d",
+               geometry.width, geometry.height, scale, logical_width, logical_height);
   }
 
-  gdk_monitor_get_geometry (monitor, &geometry);
-  scale = MAX (1, gdk_monitor_get_scale_factor (monitor));
-  logical_width = geometry.width / scale;
-  logical_height = geometry.height / scale;
-  height = CLAMP (logical_width * 280 / 360, 280, 336);
+  if (settings) {
+    char *height_setting = g_settings_get_string (settings, "keyboard-height");
+    if (g_str_equal (height_setting, "compact"))
+      height = height * 85 / 100;
+    else if (g_str_equal (height_setting, "tall"))
+      height = height * 115 / 100;
+    g_free (height_setting);
+  }
 
-  g_message ("Panel height: monitor=%dx%d scale=%d logical=%dx%d height=%d",
-             geometry.width,
-             geometry.height,
-             scale,
-             logical_width,
-             logical_height,
-             height);
+  g_message ("Panel height: %d", height);
 
   return height;
+}
+
+static int
+keyboard_height_for_panel (GSettings *settings, int panel_height)
+{
+  if (!settings)
+    return CLAMP (panel_height - 58, 206, 264);
+
+  char *height_setting = g_settings_get_string (settings, "keyboard-height");
+  int keyboard_height = g_str_equal (height_setting, "auto")
+      ? CLAMP (panel_height - 58, 206, 264)
+      : MAX (1, panel_height - 58);
+  g_free (height_setting);
+  return keyboard_height;
 }
 
 static void
@@ -765,9 +787,15 @@ refresh_view (MynaApp *self)
 static void
 set_visible (MynaApp *self, gboolean visible)
 {
+  gboolean was_visible = self->visible;
   self->visible = visible;
 
   if (visible) {
+    if (!was_visible) {
+      int height = panel_height_for_screen (self->settings);
+      myna_layer_surface_set_panel_height (MYNA_LAYER_SURFACE (self->window), height);
+      gtk_widget_set_size_request (self->keyboard_area, 1, keyboard_height_for_panel (self->settings, height));
+    }
     gtk_widget_show_all (self->window);
   } else {
     self->candidate_panel_open = FALSE;
@@ -1159,15 +1187,24 @@ activate (GtkApplication *app, gpointer user_data)
   }
 
   self->started = TRUE;
+  self->settings = myna_settings_new ();
+  if (!self->settings)
+    g_warning ("Myna settings schema unavailable; using default settings");
   self->keyboard = myna_keyboard_new ();
+  if (self->settings) {
+    char *mode = g_settings_get_string (self->settings, "default-mode");
+    if (g_str_equal (mode, "latin"))
+      myna_action_free (myna_keyboard_set_mode (self->keyboard, MYNA_MODE_LATIN));
+    g_free (mode);
+  }
 
   myna_wayland_set_visibility_callback (&self->wayland, on_wayland_visibility_requested, self);
   if (!myna_wayland_init (&self->wayland))
     g_warning ("Wayland setup was incomplete");
 
   install_css ();
-  height = panel_height_for_screen ();
-  keyboard_height = CLAMP (height - 58, 206, 264);
+  height = panel_height_for_screen (self->settings);
+  keyboard_height = keyboard_height_for_panel (self->settings, height);
   self->window = myna_layer_surface_new (self->wayland.layer_shell, self->wayland.output, height);
   gtk_application_add_window (app, GTK_WINDOW (self->window));
 
@@ -1310,6 +1347,7 @@ main (int argc, char **argv)
   g_clear_pointer (&self.introspection, g_dbus_node_info_unref);
   g_clear_pointer (&self.layout_snapshot, myna_layout_snapshot_free);
   g_clear_pointer (&self.placed_keys, g_ptr_array_unref);
+  g_clear_object (&self.settings);
   if (bus_id)
     g_bus_unown_name (bus_id);
   g_application_release (G_APPLICATION (app));

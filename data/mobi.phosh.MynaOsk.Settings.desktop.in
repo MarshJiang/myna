@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Myna Settings
+Name[zh_CN]=Myna 设置
+Comment=Configure the Myna on-screen keyboard
+Comment[zh_CN]=配置 Myna 屏幕键盘
+Exec=@bindir@/myna-settings
+Icon=input-keyboard-symbolic
+Terminal=false
+Type=Application
+Categories=GTK;Settings;
+StartupNotify=true

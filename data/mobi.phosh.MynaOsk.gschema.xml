@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="mobi.phosh.MynaOsk" path="/mobi/phosh/myna-osk/">
+    <key name="default-mode" type="s">
+      <choices>
+        <choice value="pinyin"/>
+        <choice value="latin"/>
+      </choices>
+      <default>'pinyin'</default>
+      <summary>Default input mode</summary>
+      <description>Input mode to use when Myna OSK starts.</description>
+    </key>
+    <key name="keyboard-height" type="s">
+      <choices>
+        <choice value="auto"/>
+        <choice value="compact"/>
+        <choice value="tall"/>
+      </choices>
+      <default>'auto'</default>
+      <summary>Keyboard height</summary>
+      <description>Keyboard height relative to the automatic screen size.</description>
+    </key>
+  </schema>
+</schemalist>
